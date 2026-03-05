@@ -15,7 +15,7 @@ from .widgets import Toast
 class RootWindow:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Gomoku LAN")
+        self.root.title("Heyou")
         self.root.minsize(1120, 720)
 
         self._apply_theme()
@@ -27,7 +27,7 @@ class RootWindow:
         self._header = ttk.Frame(self.root)
         self._header.pack(fill=tk.X, padx=18, pady=(18, 12))
 
-        self._title = ttk.Label(self._header, text="五子棋", style="Title.TLabel")
+        self._title = ttk.Label(self._header, text="Heyou游戏厅", style="Title.TLabel")
         self._title.pack(side=tk.LEFT)
 
         self._sub = ttk.Label(self._header, text="LAN • P2P • 即开即用", style="SubTitle.TLabel")
