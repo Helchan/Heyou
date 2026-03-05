@@ -31,32 +31,37 @@ class LobbyScreen(ttk.Frame):
         btns = ttk.Frame(top, style="Card.TFrame")
         btns.pack(side=tk.RIGHT)
         ttk.Button(btns, text="创建房间", style="Primary.TButton", command=self._create_room).pack(side=tk.LEFT)
-        ttk.Button(btns, text="加入对战", command=lambda: self._join_selected("play")).pack(side=tk.LEFT, padx=(10, 0))
-        ttk.Button(btns, text="观战", command=lambda: self._join_selected("watch")).pack(side=tk.LEFT, padx=(10, 0))
+        self.join_btn = ttk.Button(btns, text="加入对战", command=lambda: self._join_selected("play"), state=tk.DISABLED)
+        self.join_btn.pack(side=tk.LEFT, padx=(10, 0))
+        self.watch_btn = ttk.Button(btns, text="观战", command=lambda: self._join_selected("watch"), state=tk.DISABLED)
+        self.watch_btn.pack(side=tk.LEFT, padx=(10, 0))
 
         table = ttk.Frame(card, style="Card.TFrame")
         table.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
 
         self.tree = ttk.Treeview(
             table,
-            columns=("name", "host", "addr", "status", "players", "spectators"),
+            columns=("name", "game", "host", "addr", "status", "players", "spectators"),
             show="headings",
             selectmode="browse",
         )
         self.tree.heading("name", text="房间")
+        self.tree.heading("game", text="游戏")
         self.tree.heading("host", text="房主")
         self.tree.heading("addr", text="地址")
         self.tree.heading("status", text="状态")
         self.tree.heading("players", text="玩家")
         self.tree.heading("spectators", text="观战")
-        self.tree.column("name", width=340, anchor=tk.W)
-        self.tree.column("host", width=160, anchor=tk.W)
-        self.tree.column("addr", width=170, anchor=tk.W)
+        self.tree.column("name", width=280, anchor=tk.CENTER)
+        self.tree.column("game", width=130, anchor=tk.CENTER)
+        self.tree.column("host", width=150, anchor=tk.CENTER)
+        self.tree.column("addr", width=170, anchor=tk.CENTER)
         self.tree.column("status", width=120, anchor=tk.CENTER)
         self.tree.column("players", width=100, anchor=tk.CENTER)
         self.tree.column("spectators", width=100, anchor=tk.CENTER)
         self.tree.pack(fill=tk.BOTH, expand=True)
         self.tree.bind("<Double-1>", self._on_double_click)
+        self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
 
         peers_card = ttk.Frame(right, style="Card2.TFrame", width=peers_width)
         peers_card.pack(fill=tk.BOTH, expand=True)
@@ -103,21 +108,41 @@ class LobbyScreen(ttk.Frame):
         for i in self.tree.get_children():
             self.tree.delete(i)
         for r in sorted(rooms, key=lambda rr: rr.updated_ms, reverse=True):
-            status = "等待加入" if r.status == "waiting" else "对战中"
+            status = self._room_status_text(r)
+            game = self._game_name(getattr(r, "game", "gomoku"))
             host = r.host_nickname or r.host_peer_id[:6]
             addr = f"{r.host_ip}:{r.host_port}" if r.host_ip and r.host_port else ""
             self.tree.insert(
                 "",
                 tk.END,
                 iid=r.room_id,
-                values=(r.name, host, addr, status, f"{r.players}/2", str(r.spectators)),
+                values=(r.name, game, host, addr, status, f"{r.players}/2", str(r.spectators)),
             )
+        self._refresh_action_buttons()
 
     def _selected_room_id(self) -> str | None:
         sel = self.tree.selection()
         if not sel:
             return None
         return str(sel[0])
+
+    def _room_status_text(self, room: RoomSummary) -> str:
+        if room.status == "playing":
+            return "对战中"
+        if room.players >= 2:
+            return "等待开始"
+        return "等待加入"
+
+    def _refresh_action_buttons(self) -> None:
+        rid = self._selected_room_id()
+        room = self._rooms.get(rid) if rid else None
+        can_join = bool(room is not None and room.status == "waiting" and room.players < 2)
+        can_watch = bool(room is not None and room.status == "playing")
+        self.join_btn.configure(state=(tk.NORMAL if can_join else tk.DISABLED))
+        self.watch_btn.configure(state=(tk.NORMAL if can_watch else tk.DISABLED))
+
+    def _game_name(self, game: str) -> str:
+        return "五子棋" if game == "gomoku" else "未知游戏"
 
     def _join_selected(self, want: str) -> None:
         rid = self._selected_room_id()
@@ -135,8 +160,8 @@ class LobbyScreen(ttk.Frame):
                 self.app.toast.show("房间已满，只能观战")
                 return
         if want == "watch":
-            if r.status == "waiting" and r.players < 2:
-                self.app.toast.show("二缺一时只能加入对战")
+            if r.status != "playing":
+                self.app.toast.show("仅可观战对战中的房间")
                 return
         self.app.core.join_room(rid, want)
 
@@ -157,11 +182,15 @@ class LobbyScreen(ttk.Frame):
         entry.pack(fill=tk.X, pady=(8, 12))
         entry.focus_set()
 
+        ttk.Label(body, text="游戏", style="SubTitle.TLabel").pack(anchor=tk.W)
+        game_var = tk.StringVar(value="gomoku")
+        ttk.Radiobutton(body, text="五子棋", variable=game_var, value="gomoku").pack(anchor=tk.W, pady=(8, 12))
+
         btns = ttk.Frame(body, style="Card.TFrame")
         btns.pack(fill=tk.X)
 
         def ok() -> None:
-            rid = self.app.core.create_room(name_var.get())
+            rid = self.app.core.create_room(name_var.get(), game_var.get())
             win.destroy()
             self.app.show("room", room_id=rid, role="host")
 
@@ -177,5 +206,8 @@ class LobbyScreen(ttk.Frame):
             return
         if r.status == "playing":
             self._join_selected("watch")
-        else:
+        elif r.players < 2:
             self._join_selected("play")
+
+    def _on_tree_select(self, _e: tk.Event) -> None:
+        self._refresh_action_buttons()

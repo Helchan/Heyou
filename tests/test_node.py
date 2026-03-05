@@ -2,6 +2,7 @@ import queue
 import time
 import unittest
 
+from gomoku_lan.net.discovery import _probe_targets
 from gomoku_lan.net.node import Node, NodeConfig
 
 
@@ -31,7 +32,12 @@ class NodeTests(unittest.TestCase):
             n1.stop()
             n2.stop()
 
+    def test_probe_targets_include_cross_subnet_addresses(self) -> None:
+        targets = _probe_targets("10.235.96.8")
+        self.assertIn("255.255.255.255", targets)
+        self.assertIn("10.235.255.255", targets)
+        self.assertIn("10.255.255.255", targets)
+
 
 if __name__ == "__main__":
     unittest.main()
-

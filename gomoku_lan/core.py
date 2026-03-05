@@ -106,9 +106,12 @@ class Core:
         if rooms_changed:
             self._emit("rooms", {})
 
-    def create_room(self, name: str) -> str:
+    def create_room(self, name: str, game: str = "gomoku") -> str:
         assert self.node.listen_addr is not None
         room_id = f"{self.peer_id[:8]}-{new_id()[:10]}"
+        game_key = game.strip().lower() if isinstance(game, str) else "gomoku"
+        if game_key != "gomoku":
+            game_key = "gomoku"
         st = RoomHostState(
             room_id=room_id,
             name=name.strip() or "房间",
@@ -116,6 +119,7 @@ class Core:
             host_nickname=self.nickname,
             host_ip=self.node.local_ip,
             host_port=self.node.listen_addr.port,
+            game=game_key,
             created_ms=now_ms(),
             updated_ms=now_ms(),
         )
@@ -365,6 +369,7 @@ class Core:
                 players=int(room.get("players", 1) or 1),
                 spectators=int(room.get("spectators", 0) or 0),
                 updated_ms=int(room.get("updated_ms", 0) or 0),
+                game=str(room.get("game", "gomoku") or "gomoku"),
             )
         except Exception:
             return

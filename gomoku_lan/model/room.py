@@ -17,6 +17,7 @@ class RoomSummary:
     players: int
     spectators: int
     updated_ms: int
+    game: str = "gomoku"
 
 
 @dataclass
@@ -27,6 +28,7 @@ class RoomHostState:
     host_nickname: str
     host_ip: str
     host_port: int
+    game: str = "gomoku"
     status: str = "waiting"
     player2_peer_id: str | None = None
     player2_nickname: str | None = None
@@ -59,4 +61,5 @@ class RoomHostState:
             players=1 + (1 if self.player2_peer_id else 0),
             spectators=len(self.spectators),
             updated_ms=self.updated_ms,
+            game=self.game,
         )

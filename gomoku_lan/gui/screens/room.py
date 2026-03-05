@@ -120,7 +120,7 @@ class RoomScreen(ttk.Frame):
             return
         r: RoomSummary | None = getattr(self.app.core, "rooms", {}).get(self.room_id)
         if r is not None:
-            status = "等待加入" if r.status == "waiting" else "对战中"
+            status = self._room_status_text(r)
             self.title.configure(text=f"房间：{r.name}")
             host = r.host_nickname or r.host_peer_id[:6]
             addr = f"{r.host_ip}:{r.host_port}" if r.host_ip and r.host_port else ""
@@ -128,6 +128,13 @@ class RoomScreen(ttk.Frame):
         else:
             self.title.configure(text=f"房间：{self.room_id}")
             self.meta.configure(text=f"角色：{self.role}")
+
+    def _room_status_text(self, room: RoomSummary) -> str:
+        if room.status == "playing":
+            return "对战中"
+        if room.players >= 2:
+            return "等待开始"
+        return "等待加入"
 
     def update_participants(self, participants: object) -> None:
         if isinstance(participants, dict):

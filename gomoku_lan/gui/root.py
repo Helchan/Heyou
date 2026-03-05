@@ -87,7 +87,20 @@ class RootWindow:
         frame.lift()
         if hasattr(frame, "on_show"):
             getattr(frame, "on_show")(**kwargs)
+        self._refresh_top_title(name, kwargs)
         self._update_nickname_controls()
+
+    def _refresh_top_title(self, screen: str, kwargs: dict[str, object]) -> None:
+        if screen == "lobby":
+            self._title.configure(text="Heyou游戏厅")
+            self._sub.configure(text="LAN • P2P • 即开即用")
+            return
+        rid = str(kwargs.get("room_id", ""))
+        room = self.core.rooms.get(rid) if rid else None
+        game = str(getattr(room, "game", "gomoku")) if room is not None else "gomoku"
+        game_name = "五子棋" if game == "gomoku" else "未知游戏"
+        self._title.configure(text=game_name)
+        self._sub.configure(text="")
 
     def _update_nickname_controls(self) -> None:
         editable = self._current == "lobby"
@@ -133,6 +146,10 @@ class RootWindow:
             if self._current == "room":
                 room: RoomScreen = self.screens["room"]  # type: ignore[assignment]
                 room.refresh_header()
+                self._refresh_top_title("room", {"room_id": room.room_id or ""})
+            if self._current == "game":
+                game: GameScreen = self.screens["game"]  # type: ignore[assignment]
+                self._refresh_top_title("game", {"room_id": game.room_id or ""})
             return
         if ev.type == "room_entered":
             rid = str(ev.payload.get("room_id", ""))
