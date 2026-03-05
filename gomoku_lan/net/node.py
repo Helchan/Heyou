@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 import socket
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -89,6 +90,8 @@ class Node:
         )
 
     def stop(self) -> None:
+        self.broadcast({"type": "peer_offline", "peer_id": self.cfg.peer_id, "nickname": self.cfg.nickname})
+        time.sleep(0.08)
         self._stop.set()
         if self._discovery is not None:
             self._discovery.stop()
@@ -106,6 +109,7 @@ class Node:
 
     def update_nickname(self, nickname: str) -> None:
         self.cfg = NodeConfig(peer_id=self.cfg.peer_id, nickname=nickname)
+        self.broadcast({"type": "nickname_update", "peer_id": self.cfg.peer_id, "nickname": nickname})
         self._broadcast_peers()
 
     def peers_snapshot(self) -> list[PeerInfo]:
@@ -318,6 +322,38 @@ class Node:
                 self.connect_to(ip, port)
             if changed:
                 self._emit("peers_changed", {})
+            return
+
+        if mtype == "nickname_update":
+            pid = str(msg.get("peer_id", ""))
+            nick = str(msg.get("nickname", "")) or "玩家"
+            if pid and pid != self.cfg.peer_id:
+                changed = False
+                with self._peers_lock:
+                    existing = self._peers_by_id.get(pid)
+                    if existing is not None:
+                        changed = existing.nickname != nick
+                        self._peers_by_id[pid] = PeerInfo(
+                            peer_id=existing.peer_id,
+                            ip=existing.ip,
+                            port=existing.port,
+                            nickname=nick,
+                            last_seen_ms=now_ms(),
+                        )
+                if changed:
+                    self._emit("peers_changed", {})
+            return
+
+        if mtype == "peer_offline":
+            pid = str(msg.get("peer_id", ""))
+            if pid and pid != self.cfg.peer_id:
+                changed = False
+                with self._peers_lock:
+                    if pid in self._peers_by_id:
+                        del self._peers_by_id[pid]
+                        changed = True
+                if changed:
+                    self._emit("peers_changed", {})
             return
 
         self._emit("net_message", {"from": addr.key(), "message": msg})

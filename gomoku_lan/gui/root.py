@@ -9,14 +9,15 @@ from ..util import now_ms
 from .screens.game import GameScreen
 from .screens.lobby import LobbyScreen
 from .screens.room import RoomScreen
-from .widgets import Toast
+from .widgets import StatusTicker, Toast
 
 
 class RootWindow:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Heyou")
-        self.root.minsize(1120, 720)
+        self.root.geometry("1540x860")
+        self.root.minsize(1540, 720)
 
         self._apply_theme()
 
@@ -43,11 +44,8 @@ class RootWindow:
         self._nick_btn = ttk.Button(self._right, text="修改昵称", style="Primary.TButton", command=self._commit_nickname)
         self._nick_btn.pack(side=tk.LEFT, padx=(10, 0))
 
-        self._status = ttk.Label(self._right, text="正在启动…", style="Hint.TLabel")
-        self._status.pack(side=tk.LEFT, padx=(12, 0), pady=(6, 0))
-
         self._content = ttk.Frame(self.root)
-        self._content.pack(fill=tk.BOTH, expand=True, padx=18, pady=(0, 18))
+        self._content.pack(fill=tk.BOTH, expand=True, padx=18, pady=(0, 8))
 
         self.screens: dict[str, ttk.Frame] = {}
         self.screens["lobby"] = LobbyScreen(self._content, self)
@@ -57,10 +55,15 @@ class RootWindow:
         for s in self.screens.values():
             s.place(relx=0, rely=0, relwidth=1, relheight=1)
 
+        self._status_ticker = StatusTicker(self.root)
+        self._status_ticker.pack(fill=tk.X, padx=18, pady=(0, 6))
+
         self.toast = Toast(self.root)
         self._current = "lobby"
         self._room_role_by_id: dict[str, str] = {}
         self._room_chat: dict[str, list[dict[str, str]]] = {}
+        self._peer_nicknames: dict[str, str] = {}
+        self._peer_inited = False
 
         self._last_rooms_refresh_ms = 0
         self.show("lobby")
@@ -84,11 +87,22 @@ class RootWindow:
         frame.lift()
         if hasattr(frame, "on_show"):
             getattr(frame, "on_show")(**kwargs)
+        self._update_nickname_controls()
+
+    def _update_nickname_controls(self) -> None:
+        editable = self._current == "lobby"
+        state = tk.NORMAL if editable else tk.DISABLED
+        self._nick_entry.configure(state=state)
+        self._nick_btn.configure(state=state)
 
     def _commit_nickname(self) -> None:
+        if self._current != "lobby":
+            self.toast.show("仅可在大厅修改昵称")
+            return
         nick = self._nick_var.get().strip()
         if not nick:
             return
+        self._nick_var.set(nick)
         self.core.set_nickname(nick)
         self.persistent_settings = Settings(peer_id=self.persistent_settings.peer_id, nickname=nick)
         save_settings(self.persistent_settings)
@@ -99,13 +113,15 @@ class RootWindow:
 
     def _on_core_event_ui(self, ev: CoreEvent) -> None:
         if ev.type == "node":
-            ip = str(ev.payload.get("ip", ""))
-            port = int(ev.payload.get("port", 0) or 0)
-            self._status.configure(text=f"本机：{ip}:{port}")
             return
         if ev.type == "peers":
+            items = ev.payload.get("items", [])
+            self._update_status_by_peers(items)
             lobby: LobbyScreen = self.screens["lobby"]  # type: ignore[assignment]
-            lobby.set_peers(ev.payload.get("items", []))
+            lobby.set_peers(items)
+            return
+        if ev.type == "nickname_changed":
+            self._nick_var.set(str(ev.payload.get("nickname", "")) or self.core.nickname)
             return
         if ev.type == "rooms":
             now = now_ms()
@@ -177,6 +193,31 @@ class RootWindow:
                     game: GameScreen = self.screens["game"]  # type: ignore[assignment]
                     game.refresh_chat()
             return
+
+    def _update_status_by_peers(self, items: object) -> None:
+        if not isinstance(items, list):
+            return
+        current: dict[str, str] = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            pid = str(item.get("peer_id", ""))
+            if not pid or pid == self.core.peer_id:
+                continue
+            nick = str(item.get("nickname", "")).strip() or pid[:6]
+            current[pid] = nick
+        if not self._peer_inited:
+            self._peer_nicknames = current
+            self._peer_inited = True
+            return
+        prev = self._peer_nicknames
+        joined = [pid for pid in current if pid not in prev]
+        left = [pid for pid in prev if pid not in current]
+        for pid in joined:
+            self._status_ticker.push(f"{current.get(pid, pid[:6])} 上线了")
+        for pid in left:
+            self._status_ticker.push(f"{prev.get(pid, pid[:6])} 下线了")
+        self._peer_nicknames = current
 
     def _apply_theme(self) -> None:
         style = ttk.Style(self.root)

@@ -11,12 +11,14 @@ class LobbyScreen(ttk.Frame):
         super().__init__(parent)
         self.app = app
         self._rooms: dict[str, RoomSummary] = {}
+        peers_width = 480
 
         left = ttk.Frame(self)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        right = ttk.Frame(self)
-        right.pack(side=tk.RIGHT, fill=tk.Y)
+        right = ttk.Frame(self, width=peers_width)
+        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(12, 0))
+        right.pack_propagate(False)
 
         card = ttk.Frame(left, style="Card.TFrame")
         card.pack(fill=tk.BOTH, expand=True)
@@ -56,9 +58,10 @@ class LobbyScreen(ttk.Frame):
         self.tree.pack(fill=tk.BOTH, expand=True)
         self.tree.bind("<Double-1>", self._on_double_click)
 
-        peers_card = ttk.Frame(right, style="Card2.TFrame")
+        peers_card = ttk.Frame(right, style="Card2.TFrame", width=peers_width)
         peers_card.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(peers_card, text="已发现的同伴", style="SubTitle.TLabel").pack(anchor=tk.W, padx=14, pady=(14, 10))
+        peers_card.pack_propagate(False)
+        ttk.Label(peers_card, text="在线用户", style="SubTitle.TLabel").pack(anchor=tk.W, padx=14, pady=(14, 10))
         self.peers = tk.Listbox(
             peers_card,
             bg="#0f1b33",
@@ -67,6 +70,7 @@ class LobbyScreen(ttk.Frame):
             relief="flat",
             activestyle="none",
             font=("Helvetica", 11),
+            width=56,
         )
         self.peers.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
 
@@ -77,13 +81,22 @@ class LobbyScreen(ttk.Frame):
         if not isinstance(items, list):
             return
         self.peers.delete(0, tk.END)
-        for p in sorted(items, key=lambda x: str(x.get("nickname", "")) if isinstance(x, dict) else ""):
+        me = str(getattr(self.app.core, "peer_id", ""))
+        def peer_sort_key(item: object) -> tuple[int, str]:
+            if not isinstance(item, dict):
+                return (1, "")
+            pid = str(item.get("peer_id", ""))
+            nick = str(item.get("nickname", ""))
+            return (0 if pid == me else 1, nick)
+        for p in sorted(items, key=peer_sort_key):
             if not isinstance(p, dict):
                 continue
+            pid = str(p.get("peer_id", ""))
             nick = str(p.get("nickname", "玩家"))
             ip = str(p.get("ip", ""))
             port = int(p.get("port", 0) or 0)
-            self.peers.insert(tk.END, f"{nick}  {ip}:{port}")
+            suffix = "（本机）" if pid == me else ""
+            self.peers.insert(tk.END, f"{nick} {ip}:{port}{suffix}")
 
     def set_rooms(self, rooms: list[RoomSummary]) -> None:
         self._rooms = {r.room_id: r for r in rooms}

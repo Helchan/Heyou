@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
+from collections import deque
 
 
 class Toast:
@@ -50,3 +51,87 @@ class Toast:
         self._win = None
         self._after = None
 
+
+class StatusTicker(ttk.Frame):
+    def __init__(self, parent: tk.Widget) -> None:
+        super().__init__(parent, style="TFrame")
+        self._queue: deque[str] = deque()
+        self._text = ""
+        self._text_id: int | None = None
+        self._x = 0
+        self._after: str | None = None
+
+        self._canvas = tk.Canvas(
+            self,
+            bg="#0b1220",
+            highlightthickness=0,
+            bd=0,
+            relief="flat",
+            height=16,
+        )
+        self._canvas.pack(fill=tk.X, expand=True, padx=10, pady=0)
+        self._canvas.bind("<Configure>", self._on_resize)
+
+    def push(self, text: str) -> None:
+        t = text.strip()
+        if not t:
+            return
+        self._queue.append(t)
+        if self._after is None:
+            self._start_next()
+
+    def _on_resize(self, _ev: tk.Event) -> None:
+        if self._text_id is None:
+            return
+        box = self._canvas.bbox(self._text_id)
+        if not box:
+            return
+        canvas_w = self._canvas.winfo_width()
+        text_w = box[2] - box[0]
+        if self._x > canvas_w + text_w:
+            self._start_next()
+
+    def _start_next(self) -> None:
+        if self._after is not None:
+            self.after_cancel(self._after)
+            self._after = None
+        if not self._queue:
+            self._text = ""
+            if self._text_id is not None:
+                self._canvas.itemconfigure(self._text_id, text="")
+            return
+        self._text = self._queue.popleft()
+        if self._text_id is None:
+            self._text_id = self._canvas.create_text(
+                0,
+                8,
+                text=self._text,
+                fill="#475569",
+                anchor="w",
+                font=("Helvetica", 10),
+            )
+        else:
+            self._canvas.itemconfigure(self._text_id, text=self._text)
+        self._x = -self._text_width()
+        self._canvas.coords(self._text_id, self._x, 8)
+        self._tick()
+
+    def _text_width(self) -> int:
+        if self._text_id is None:
+            return 0
+        box = self._canvas.bbox(self._text_id)
+        if not box:
+            return 0
+        return max(0, box[2] - box[0])
+
+    def _tick(self) -> None:
+        if self._text_id is None:
+            return
+        text_w = self._text_width()
+        canvas_w = self._canvas.winfo_width()
+        self._x += 2
+        self._canvas.coords(self._text_id, self._x, 8)
+        if self._x > canvas_w:
+            self._start_next()
+            return
+        self._after = self.after(24, self._tick)

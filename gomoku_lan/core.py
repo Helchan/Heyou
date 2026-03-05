@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import random
 from typing import Any, Callable
 
@@ -47,6 +47,7 @@ class Core:
 
     def start(self) -> None:
         self.node.start()
+        self._emit_peers()
         self._room_ad_thread = threading.Thread(target=self._room_ad_loop, name="room-ad", daemon=True)
         self._room_ad_thread.start()
         self._prune_thread = threading.Thread(target=self._prune_loop, name="room-prune", daemon=True)
@@ -58,10 +59,52 @@ class Core:
 
     def set_nickname(self, nickname: str) -> None:
         nick = nickname.strip() or "玩家"
-        with self._lock:
-            self._known_nicknames[self.peer_id] = nick
+        if nick == self.nickname:
+            return
+        self._apply_nickname_update(self.peer_id, nick)
         self.node.update_nickname(nick)
         self._emit("nickname_changed", {"nickname": nick})
+        self._emit_peers()
+
+    def _apply_nickname_update(self, peer_id: str, nickname: str) -> None:
+        nick = nickname.strip() or "玩家"
+        host_room_ids: list[str] = []
+        rooms_changed = False
+        now = now_ms()
+        with self._lock:
+            self._known_nicknames[peer_id] = nick
+            for rid, st in self._host_rooms.items():
+                if peer_id != st.host_peer_id and peer_id != st.player2_peer_id and peer_id not in st.spectators:
+                    continue
+                st.nicknames[peer_id] = nick
+                if peer_id == st.host_peer_id:
+                    st.host_nickname = nick
+                if peer_id == st.player2_peer_id:
+                    st.player2_nickname = nick
+                st.updated_ms = now
+                host_room_ids.append(rid)
+            for rid, summary in list(self.rooms.items()):
+                changed = False
+                updated = summary
+                if summary.host_peer_id == peer_id and summary.host_nickname != nick:
+                    updated = replace(updated, host_nickname=nick, updated_ms=max(updated.updated_ms, now))
+                    changed = True
+                if summary.player2_peer_id == peer_id and (summary.player2_nickname or "") != nick:
+                    updated = replace(updated, player2_nickname=nick, updated_ms=max(updated.updated_ms, now))
+                    changed = True
+                if changed:
+                    self.rooms[rid] = updated
+                    rooms_changed = True
+        for rid in host_room_ids:
+            self._announce_room(rid)
+            with self._lock:
+                st = self._host_rooms.get(rid)
+                parts = st.participants() if st is not None else None
+            if parts is not None:
+                self._broadcast_room(rid, {"type": "room_state", "room_id": rid, "participants": parts})
+                self._emit("room_state", {"room_id": rid, "participants": parts})
+        if rooms_changed:
+            self._emit("rooms", {})
 
     def create_room(self, name: str) -> str:
         assert self.node.listen_addr is not None
@@ -201,22 +244,44 @@ class Core:
             return
         self.node.send_to_peer(room.host_peer_id, msg)
 
+    def _emit_peers(self) -> None:
+        peers = [
+            {
+                "peer_id": self.peer_id,
+                "nickname": self.nickname,
+                "ip": self.node.local_ip,
+                "port": (self.node.listen_addr.port if self.node.listen_addr is not None else 0),
+                "last_seen_ms": now_ms(),
+            }
+        ]
+        peers.extend(
+            [
+                {
+                    "peer_id": p.peer_id,
+                    "nickname": p.nickname,
+                    "ip": p.ip,
+                    "port": p.port,
+                    "last_seen_ms": p.last_seen_ms,
+                }
+                for p in self.node.peers_snapshot()
+                if p.peer_id != self.peer_id
+            ]
+        )
+        with self._lock:
+            for p in peers:
+                pid = str(p.get("peer_id", ""))
+                nick = str(p.get("nickname", ""))
+                if pid and nick:
+                    self._known_nicknames[pid] = nick
+        self._emit("peers", {"items": peers})
+
     def _on_node_event(self, ev: NodeEvent) -> None:
         if ev.type == "node_started":
             self._emit("node", ev.payload)
+            self._emit_peers()
             return
         if ev.type == "peers_changed":
-            peers = [
-                {"peer_id": p.peer_id, "nickname": p.nickname, "ip": p.ip, "port": p.port, "last_seen_ms": p.last_seen_ms}
-                for p in self.node.peers_snapshot()
-            ]
-            with self._lock:
-                for p in peers:
-                    pid = str(p.get("peer_id", ""))
-                    nick = str(p.get("nickname", ""))
-                    if pid and nick:
-                        self._known_nicknames[pid] = nick
-            self._emit("peers", {"items": peers})
+            self._emit_peers()
             return
         if ev.type == "net_message":
             msg = ev.payload.get("message")
@@ -226,6 +291,12 @@ class Core:
 
     def _handle_message(self, msg: dict[str, Any]) -> None:
         mtype = msg.get("type")
+        if mtype == "nickname_update":
+            peer_id = str(msg.get("peer_id", ""))
+            nickname = str(msg.get("nickname", ""))
+            if peer_id and nickname:
+                self._apply_nickname_update(peer_id, nickname)
+            return
         if mtype == "room_announce":
             room = msg.get("room")
             if isinstance(room, dict):
@@ -378,8 +449,8 @@ class Core:
                 colors = self._colors.get(room_id)
                 game = self._games.get(room_id)
             if colors and game and st.player2_peer_id:
-                black = st.host_peer_id
-                white = st.player2_peer_id
+                black = next((pid for pid, c in colors.items() if c == 1), st.host_peer_id)
+                white = next((pid for pid, c in colors.items() if c == 2), st.player2_peer_id)
                 self.node.send_to_peer(
                     peer_id,
                     {
@@ -494,10 +565,11 @@ class Core:
 
         win_color = check_winner(game.board, x, y)
         if win_color:
-            if win_color == 1:
-                game.winner_peer_id = st.host_peer_id
+            winner_peer_id = next((pid for pid, c in colors.items() if c == win_color), None)
+            if winner_peer_id:
+                game.winner_peer_id = winner_peer_id
             else:
-                game.winner_peer_id = st.player2_peer_id
+                game.winner_peer_id = peer_id
 
             st.status = "waiting"
             if st.player2_peer_id:

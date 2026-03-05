@@ -289,6 +289,7 @@ class GameScreen(ttk.Frame):
             return
         my_id = getattr(self.app.core, "peer_id", "")
         nicks = getattr(self.app.core, "_known_nicknames", {})
+        colors = getattr(self.app.core, "_colors", {}).get(self.room_id, {})
 
         def name(pid: str) -> str:
             if isinstance(nicks, dict) and pid in nicks:
@@ -305,12 +306,30 @@ class GameScreen(ttk.Frame):
         body = ttk.Frame(win, style="Card.TFrame")
         body.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
 
-        title = "你赢了" if winner_peer_id == my_id else f"胜者：{name(winner_peer_id)}"
+        my_color = colors.get(my_id) if isinstance(colors, dict) else None
+        if winner_peer_id == my_id:
+            title = "你赢了"
+        elif my_color in (1, 2):
+            title = "你输了"
+        else:
+            title = f"胜者：{name(winner_peer_id)}"
         ttk.Label(body, text=title, style="Title.TLabel").pack(anchor=tk.W)
         ttk.Label(body, text="你可以返回房间，或由房主重置棋盘再来一局。", style="Hint.TLabel").pack(anchor=tk.W, pady=(8, 14))
 
         btns = ttk.Frame(body, style="Card.TFrame")
         btns.pack(fill=tk.X)
+        win.update_idletasks()
+        root = self.winfo_toplevel()
+        root.update_idletasks()
+        width = win.winfo_width()
+        height = win.winfo_height()
+        root_width = root.winfo_width()
+        root_height = root.winfo_height()
+        root_x = root.winfo_rootx()
+        root_y = root.winfo_rooty()
+        x = root_x + (root_width - width) // 2
+        y = root_y + (root_height - height) // 2
+        win.geometry(f"{width}x{height}+{x}+{y}")
 
         def back() -> None:
             win.destroy()
