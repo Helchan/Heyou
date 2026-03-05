@@ -32,7 +32,3 @@ if [ $? -ne 0 ]; then
     echo "如果是 'macOS 13 required' 错误，请尝试升级 macOS 或安装最新版 Python："
     echo "brew install python"
 fi
-
-echo ""
-echo "程序已退出，按任意键关闭..."
-read -n 1 -s
