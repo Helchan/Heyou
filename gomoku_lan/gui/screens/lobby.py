@@ -192,7 +192,7 @@ class LobbyScreen(ttk.Frame):
         def ok() -> None:
             rid = self.app.core.create_room(name_var.get(), game_var.get())
             win.destroy()
-            self.app.show("room", room_id=rid, role="host")
+            self.app.show("game", room_id=rid, role="host")
 
         ttk.Button(btns, text="取消", command=win.destroy).pack(side=tk.RIGHT)
         ttk.Button(btns, text="创建", style="Primary.TButton", command=ok).pack(side=tk.RIGHT, padx=(0, 10))

@@ -19,6 +19,9 @@ class GameScreen(ttk.Frame):
         self._turn_peer_id: str | None = None
         self._turn_started_s = time.monotonic()
         self._timer_job: str | None = None
+        self.role: str = "spectator"
+        self._participants: dict[str, object] = {}
+        self._ready_state = False
 
         card = ttk.Frame(self, style="Card.TFrame")
         card.pack(fill=tk.BOTH, expand=True)
@@ -35,8 +38,6 @@ class GameScreen(ttk.Frame):
         self.timer = ttk.Label(header, text="", style="Hint.TLabel")
         self.timer.pack(side=tk.LEFT, padx=(12, 0), pady=(2, 0))
 
-        ttk.Button(header, text="返回房间", command=self._back).pack(side=tk.RIGHT)
-
         body = ttk.Frame(card, style="Card.TFrame")
         body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
 
@@ -52,7 +53,25 @@ class GameScreen(ttk.Frame):
         self.canvas.bind("<Button-1>", self._on_click)
         self.canvas.bind("<Configure>", lambda _e: self._redraw())
 
-        ttk.Label(right, text="聊天", style="SubTitle.TLabel").pack(anchor=tk.W, padx=12, pady=(12, 10))
+        ttk.Label(right, text="成员", style="SubTitle.TLabel").pack(anchor=tk.W, padx=12, pady=(12, 10))
+        self.participants = tk.Listbox(
+            right,
+            bg="#0f1b33",
+            fg="#e5e7eb",
+            highlightthickness=0,
+            relief="flat",
+            activestyle="none",
+            font=("Helvetica", 11),
+            height=9,
+        )
+        self.participants.pack(fill=tk.X, padx=12)
+
+        ttk.Label(right, text="操作", style="SubTitle.TLabel").pack(anchor=tk.W, padx=12, pady=(12, 8))
+
+        self.note = ttk.Label(right, text="等待双方准备后由房主开始", style="Hint.TLabel", wraplength=280)
+        self.note.pack(anchor=tk.W, padx=12, pady=(0, 12))
+
+        ttk.Label(right, text="聊天", style="SubTitle.TLabel").pack(anchor=tk.W, padx=12, pady=(2, 10))
         self.chat = tk.Listbox(
             right,
             bg="#0f1b33",
@@ -75,16 +94,27 @@ class GameScreen(ttk.Frame):
         self._cell = 36
         self._origin = (20, 20)
 
-    def on_show(self, room_id: str, black_peer_id: str | None = None, white_peer_id: str | None = None, **_kwargs: object) -> None:
+    def on_show(
+        self,
+        room_id: str,
+        black_peer_id: str | None = None,
+        white_peer_id: str | None = None,
+        role: str = "spectator",
+        participants: object = None,
+        **_kwargs: object,
+    ) -> None:
         self.room_id = room_id
+        self.role = role
         self._winner_modal_for = None
         self._turn_peer_id = None
         self._turn_started_s = time.monotonic()
+        self._ready_state = False
         if black_peer_id:
             self.black_peer_id = black_peer_id
         if white_peer_id:
             self.white_peer_id = white_peer_id
         self.title.configure(text=f"棋盘 • 房间 {room_id[:8]}")
+        self.update_participants(participants)
         self.refresh_chat()
         self.refresh()
         self._ensure_timer()
@@ -123,6 +153,7 @@ class GameScreen(ttk.Frame):
             self.status.configure(text="等待房主开始…")
             self.timer.configure(text="")
             self._redraw()
+            self._refresh_controls()
             return
         my_id = getattr(self.app.core, "peer_id", "")
         nicks = getattr(self.app.core, "_known_nicknames", {})
@@ -171,6 +202,63 @@ class GameScreen(ttk.Frame):
             if self._winner_modal_for != token:
                 self._winner_modal_for = token
                 self._show_winner_modal(game.winner_peer_id)
+        self._refresh_controls()
+
+    def update_participants(self, participants: object) -> None:
+        if isinstance(participants, dict):
+            self._participants = participants
+        self.participants.delete(0, tk.END)
+        host = str(self._participants.get("host_peer_id", ""))
+        p2 = str(self._participants.get("player2_peer_id", "")) if self._participants.get("player2_peer_id") else ""
+        spectators = self._participants.get("spectators")
+        ready = self._participants.get("ready") if isinstance(self._participants.get("ready"), dict) else {}
+        nicknames = self._participants.get("nicknames") if isinstance(self._participants.get("nicknames"), dict) else {}
+
+        def add_line(label: str, pid: str, host_player: bool = False) -> None:
+            nick = str(nicknames.get(pid, "")) if isinstance(nicknames, dict) else ""
+            show = nick if nick else pid[:6]
+            if host_player:
+                flag = "（房主）"
+            else:
+                flag = "（已准备）" if isinstance(ready, dict) and ready.get(pid) else "（准备中）"
+            self.participants.insert(tk.END, f"{label}：{show}{flag}")
+
+        if host:
+            add_line("玩家一", host, host_player=True)
+        else:
+            self.participants.insert(tk.END, "玩家一：待加入")
+        if p2:
+            add_line("玩家二", p2)
+        else:
+            self.participants.insert(tk.END, "玩家二：待加入")
+
+        if isinstance(spectators, list):
+            if spectators:
+                self.participants.insert(tk.END, "观战成员：")
+                for sid in spectators:
+                    s = str(sid)
+                    nick = str(nicknames.get(s, "")) if isinstance(nicknames, dict) else ""
+                    self.participants.insert(tk.END, f"  · {nick if nick else s[:6]}")
+            else:
+                self.participants.insert(tk.END, "观战成员：暂无")
+        self._refresh_controls()
+
+    def _refresh_controls(self) -> None:
+        ready = self._participants.get("ready") if isinstance(self._participants.get("ready"), dict) else {}
+        my_id = getattr(self.app.core, "peer_id", "")
+        if self.role == "player2" and isinstance(ready, dict):
+            self._ready_state = bool(ready.get(my_id))
+        if self.role == "spectator":
+            self.note.configure(text="你正在观战。")
+        elif self.role == "player2":
+            self.note.configure(text="你是玩家二，点击准备后等待房主开始对弈。")
+        else:
+            self.note.configure(text="仅当玩家二已准备，才可开始对弈。")
+        if hasattr(self.app, "_sync_game_header_actions"):
+            try:
+                getattr(self.app, "_sync_game_header_actions")()
+            except Exception:
+                pass
 
     def _ensure_timer(self) -> None:
         if self._timer_job is not None:
@@ -193,10 +281,20 @@ class GameScreen(ttk.Frame):
 
     def _back(self) -> None:
         if self.room_id:
-            role = getattr(self.app, "_room_role_by_id", {}).get(self.room_id, "spectator")
-            self.app.show("room", room_id=self.room_id, role=role)
-        else:
-            self.app.show("lobby")
+            self.app.core.leave_room(self.room_id)
+            return
+        self.app.show("lobby")
+
+    def can_start_game(self) -> bool:
+        ready = self._participants.get("ready") if isinstance(self._participants.get("ready"), dict) else {}
+        p2 = str(self._participants.get("player2_peer_id", "")) if self._participants.get("player2_peer_id") else ""
+        return bool(self.role == "host" and p2 and isinstance(ready, dict) and ready.get(p2))
+
+    def can_toggle_ready(self) -> bool:
+        return bool(self.role == "player2" and self.room_id)
+
+    def ready_button_text(self) -> str:
+        return "取消准备" if self._ready_state else "准备"
 
     def _metrics(self) -> tuple[int, int, int]:
         w = max(200, int(self.canvas.winfo_width()))
@@ -284,6 +382,33 @@ class GameScreen(ttk.Frame):
         self._chat_var.set("")
         self.app.core.send_chat(self.room_id, text)
 
+    def _toggle_ready(self) -> None:
+        if not self.room_id:
+            return
+        self._ready_state = not self._ready_state
+        self.app.core.set_ready(self.room_id, self._ready_state)
+        if hasattr(self.app, "_sync_game_header_actions"):
+            try:
+                getattr(self.app, "_sync_game_header_actions")()
+            except Exception:
+                pass
+
+    def _start(self) -> None:
+        if not self.room_id:
+            return
+        ready = self._participants.get("ready") if isinstance(self._participants.get("ready"), dict) else {}
+        p2 = str(self._participants.get("player2_peer_id", "")) if self._participants.get("player2_peer_id") else ""
+        can_start = bool(self.role == "host" and p2 and isinstance(ready, dict) and ready.get(p2))
+        if not can_start:
+            self.app.toast.show("玩家二准备后才可开始对弈")
+            return
+        self.app.core.start_game(self.room_id)
+
+    def _leave(self) -> None:
+        if not self.room_id:
+            return
+        self.app.core.leave_room(self.room_id)
+
     def _show_winner_modal(self, winner_peer_id: str) -> None:
         if not self.room_id:
             return
@@ -314,7 +439,7 @@ class GameScreen(ttk.Frame):
         else:
             title = f"胜者：{name(winner_peer_id)}"
         ttk.Label(body, text=title, style="Title.TLabel").pack(anchor=tk.W)
-        ttk.Label(body, text="你可以返回房间，或由房主重置棋盘再来一局。", style="Hint.TLabel").pack(anchor=tk.W, pady=(8, 14))
+        ttk.Label(body, text="你可以返回大厅。", style="Hint.TLabel").pack(anchor=tk.W, pady=(8, 14))
 
         btns = ttk.Frame(body, style="Card.TFrame")
         btns.pack(fill=tk.X)
@@ -335,13 +460,4 @@ class GameScreen(ttk.Frame):
             win.destroy()
             self._back()
 
-        ttk.Button(btns, text="返回房间", command=back).pack(side=tk.RIGHT)
-
-        role = getattr(self.app, "_room_role_by_id", {}).get(self.room_id, "spectator")
-        if role == "host":
-            def again() -> None:
-                win.destroy()
-                self.app.core.reset_game(self.room_id)
-                self._back()
-
-            ttk.Button(btns, text="再来一局", style="Primary.TButton", command=again).pack(side=tk.RIGHT, padx=(0, 10))
+        ttk.Button(btns, text="返回大厅", command=back).pack(side=tk.RIGHT)

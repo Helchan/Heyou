@@ -4,11 +4,10 @@ import tkinter as tk
 from tkinter import ttk
 
 from ..core import Core, CoreEvent
-from ..storage import Settings, allocate_runtime_settings, load_settings, save_settings
+from ..storage import Settings, allocate_runtime_settings, load_settings
 from ..util import now_ms
 from .screens.game import GameScreen
 from .screens.lobby import LobbyScreen
-from .screens.room import RoomScreen
 from .widgets import StatusTicker, Toast
 
 
@@ -34,22 +33,19 @@ class RootWindow:
         self._sub = ttk.Label(self._header, text="LAN • P2P • 即开即用", style="SubTitle.TLabel")
         self._sub.pack(side=tk.LEFT, padx=(10, 0), pady=(6, 0))
 
-        self._right = ttk.Frame(self._header)
-        self._right.pack(side=tk.RIGHT)
-
-        self._nick_var = tk.StringVar(value=self.core.nickname)
-        self._nick_entry = ttk.Entry(self._right, textvariable=self._nick_var, width=18, style="Nick.TEntry")
-        self._nick_entry.pack(side=tk.LEFT)
-        self._nick_entry.bind("<Return>", lambda _e: self._commit_nickname())
-        self._nick_btn = ttk.Button(self._right, text="修改昵称", style="Primary.TButton", command=self._commit_nickname)
-        self._nick_btn.pack(side=tk.LEFT, padx=(10, 0))
+        self._game_actions = ttk.Frame(self._header)
+        self._game_ready_btn = ttk.Button(self._game_actions, text="准备", style="Primary.TButton", command=self._on_header_ready)
+        self._game_ready_btn.pack(side=tk.LEFT, padx=(0, 10))
+        self._game_start_btn = ttk.Button(self._game_actions, text="开始对弈", style="Primary.TButton", command=self._on_header_start)
+        self._game_start_btn.pack(side=tk.LEFT, padx=(0, 10))
+        self._game_back_btn = ttk.Button(self._game_actions, text="返回大厅", command=self._on_header_back)
+        self._game_back_btn.pack(side=tk.LEFT)
 
         self._content = ttk.Frame(self.root)
         self._content.pack(fill=tk.BOTH, expand=True, padx=18, pady=(0, 8))
 
         self.screens: dict[str, ttk.Frame] = {}
         self.screens["lobby"] = LobbyScreen(self._content, self)
-        self.screens["room"] = RoomScreen(self._content, self)
         self.screens["game"] = GameScreen(self._content, self)
 
         for s in self.screens.values():
@@ -62,6 +58,7 @@ class RootWindow:
         self._current = "lobby"
         self._room_role_by_id: dict[str, str] = {}
         self._room_chat: dict[str, list[dict[str, str]]] = {}
+        self._room_participants_by_id: dict[str, object] = {}
         self._peer_nicknames: dict[str, str] = {}
         self._peer_inited = False
 
@@ -88,7 +85,7 @@ class RootWindow:
         if hasattr(frame, "on_show"):
             getattr(frame, "on_show")(**kwargs)
         self._refresh_top_title(name, kwargs)
-        self._update_nickname_controls()
+        self._sync_game_header_actions()
 
     def _refresh_top_title(self, screen: str, kwargs: dict[str, object]) -> None:
         if screen == "lobby":
@@ -102,24 +99,48 @@ class RootWindow:
         self._title.configure(text=game_name)
         self._sub.configure(text="")
 
-    def _update_nickname_controls(self) -> None:
-        editable = self._current == "lobby"
-        state = tk.NORMAL if editable else tk.DISABLED
-        self._nick_entry.configure(state=state)
-        self._nick_btn.configure(state=state)
+    def _sync_game_header_actions(self) -> None:
+        if self._current != "game":
+            if self._game_actions.winfo_manager():
+                self._game_actions.pack_forget()
+            return
+        if not self._game_actions.winfo_manager():
+            self._game_actions.pack(side=tk.RIGHT)
+        game: GameScreen = self.screens["game"]  # type: ignore[assignment]
+        if game.can_toggle_ready():
+            if not self._game_ready_btn.winfo_manager():
+                self._game_ready_btn.pack(side=tk.LEFT, padx=(0, 10), before=self._game_back_btn)
+            self._game_ready_btn.configure(text=game.ready_button_text(), state=tk.NORMAL)
+        else:
+            if self._game_ready_btn.winfo_manager():
+                self._game_ready_btn.pack_forget()
+        if game.role == "host":
+            if not self._game_start_btn.winfo_manager():
+                self._game_start_btn.pack(side=tk.LEFT, padx=(0, 10), before=self._game_back_btn)
+            state = tk.NORMAL if game.can_start_game() else tk.DISABLED
+            self._game_start_btn.configure(state=state)
+        else:
+            if self._game_start_btn.winfo_manager():
+                self._game_start_btn.pack_forget()
 
-    def _commit_nickname(self) -> None:
-        if self._current != "lobby":
-            self.toast.show("仅可在大厅修改昵称")
+    def _on_header_ready(self) -> None:
+        if self._current != "game":
             return
-        nick = self._nick_var.get().strip()
-        if not nick:
+        game: GameScreen = self.screens["game"]  # type: ignore[assignment]
+        game._toggle_ready()
+
+    def _on_header_start(self) -> None:
+        if self._current != "game":
             return
-        self._nick_var.set(nick)
-        self.core.set_nickname(nick)
-        self.persistent_settings = Settings(peer_id=self.persistent_settings.peer_id, nickname=nick)
-        save_settings(self.persistent_settings)
-        self.toast.show("昵称已更新")
+        game: GameScreen = self.screens["game"]  # type: ignore[assignment]
+        game._start()
+
+    def _on_header_back(self) -> None:
+        if self._current != "game":
+            self.show("lobby")
+            return
+        game: GameScreen = self.screens["game"]  # type: ignore[assignment]
+        game._back()
 
     def _on_core_event(self, ev: CoreEvent) -> None:
         self.root.after(0, lambda: self._on_core_event_ui(ev))
@@ -133,9 +154,6 @@ class RootWindow:
             lobby: LobbyScreen = self.screens["lobby"]  # type: ignore[assignment]
             lobby.set_peers(items)
             return
-        if ev.type == "nickname_changed":
-            self._nick_var.set(str(ev.payload.get("nickname", "")) or self.core.nickname)
-            return
         if ev.type == "rooms":
             now = now_ms()
             if now - self._last_rooms_refresh_ms < 120:
@@ -143,13 +161,10 @@ class RootWindow:
             self._last_rooms_refresh_ms = now
             lobby: LobbyScreen = self.screens["lobby"]  # type: ignore[assignment]
             lobby.set_rooms(list(self.core.rooms.values()))
-            if self._current == "room":
-                room: RoomScreen = self.screens["room"]  # type: ignore[assignment]
-                room.refresh_header()
-                self._refresh_top_title("room", {"room_id": room.room_id or ""})
             if self._current == "game":
                 game: GameScreen = self.screens["game"]  # type: ignore[assignment]
                 self._refresh_top_title("game", {"room_id": game.room_id or ""})
+                self._sync_game_header_actions()
             return
         if ev.type == "room_entered":
             rid = str(ev.payload.get("room_id", ""))
@@ -157,29 +172,35 @@ class RootWindow:
             if rid:
                 self._room_role_by_id[rid] = role
                 self._room_chat.setdefault(rid, [])
+                participants = ev.payload.get("participants")
+                if participants is not None:
+                    self._room_participants_by_id[rid] = participants
             if rid:
-                status = str(ev.payload.get("status", ""))
-                room = self.core.rooms.get(rid)
-                if not status and room is not None:
-                    status = room.status
-                if status == "playing" and role == "spectator":
-                    self.show("game", room_id=rid)
-                else:
-                    self.show("room", **ev.payload)
+                payload = dict(ev.payload)
+                if "participants" not in payload:
+                    payload["participants"] = self._room_participants_by_id.get(rid)
+                self.show("game", **payload)
             else:
-                self.show("room", **ev.payload)
+                self.show("lobby")
             return
         if ev.type == "room_left":
             rid = str(ev.payload.get("room_id", ""))
             if rid:
                 self._room_role_by_id.pop(rid, None)
                 self._room_chat.pop(rid, None)
+                self._room_participants_by_id.pop(rid, None)
             self.show("lobby")
             return
         if ev.type == "room_state":
-            room: RoomScreen = self.screens["room"]  # type: ignore[assignment]
-            if self._current == "room":
-                room.update_participants(ev.payload.get("participants"))
+            rid = str(ev.payload.get("room_id", ""))
+            participants = ev.payload.get("participants")
+            if rid and participants is not None:
+                self._room_participants_by_id[rid] = participants
+            if self._current == "game":
+                game: GameScreen = self.screens["game"]  # type: ignore[assignment]
+                if game.room_id and game.room_id == rid:
+                    game.update_participants(participants)
+                self._sync_game_header_actions()
             return
         if ev.type == "toast":
             self.toast.show(str(ev.payload.get("text", "")) or "提示")
@@ -191,6 +212,7 @@ class RootWindow:
             game: GameScreen = self.screens["game"]  # type: ignore[assignment]
             if self._current == "game":
                 game.refresh()
+                self._sync_game_header_actions()
             return
 
         if ev.type == "chat":
@@ -203,9 +225,6 @@ class RootWindow:
                     }
                 )
                 self._room_chat[rid] = self._room_chat[rid][-200:]
-                if self._current == "room":
-                    room: RoomScreen = self.screens["room"]  # type: ignore[assignment]
-                    room.refresh_chat()
                 if self._current == "game":
                     game: GameScreen = self.screens["game"]  # type: ignore[assignment]
                     game.refresh_chat()
