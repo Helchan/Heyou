@@ -28,14 +28,6 @@ class LobbyScreen(ttk.Frame):
 
         ttk.Label(top, text="大厅 / 房间列表", style="SubTitle.TLabel").pack(side=tk.LEFT)
 
-        btns = ttk.Frame(top, style="Card.TFrame")
-        btns.pack(side=tk.RIGHT)
-        ttk.Button(btns, text="创建房间", style="Primary.TButton", command=self._create_room).pack(side=tk.LEFT)
-        self.join_btn = ttk.Button(btns, text="加入对战", command=lambda: self._join_selected("play"), state=tk.DISABLED)
-        self.join_btn.pack(side=tk.LEFT, padx=(10, 0))
-        self.watch_btn = ttk.Button(btns, text="观战", command=lambda: self._join_selected("watch"), state=tk.DISABLED)
-        self.watch_btn.pack(side=tk.LEFT, padx=(10, 0))
-
         table = ttk.Frame(card, style="Card.TFrame")
         table.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
 
@@ -134,12 +126,11 @@ class LobbyScreen(ttk.Frame):
         return "等待加入"
 
     def _refresh_action_buttons(self) -> None:
-        rid = self._selected_room_id()
-        room = self._rooms.get(rid) if rid else None
-        can_join = bool(room is not None and room.status == "waiting" and room.players < 2)
-        can_watch = bool(room is not None and room.status == "playing")
-        self.join_btn.configure(state=(tk.NORMAL if can_join else tk.DISABLED))
-        self.watch_btn.configure(state=(tk.NORMAL if can_watch else tk.DISABLED))
+        if hasattr(self.app, "_sync_game_header_actions"):
+            try:
+                getattr(self.app, "_sync_game_header_actions")()
+            except Exception:
+                pass
 
     def _game_name(self, game: str) -> str:
         return "五子棋" if game == "gomoku" else "未知游戏"
@@ -164,6 +155,25 @@ class LobbyScreen(ttk.Frame):
                 self.app.toast.show("仅可观战对战中的房间")
                 return
         self.app.core.join_room(rid, want)
+
+    def can_join_selected(self) -> bool:
+        rid = self._selected_room_id()
+        room = self._rooms.get(rid) if rid else None
+        return bool(room is not None and room.status == "waiting" and room.players < 2)
+
+    def can_watch_selected(self) -> bool:
+        rid = self._selected_room_id()
+        room = self._rooms.get(rid) if rid else None
+        return bool(room is not None and room.status == "playing")
+
+    def create_room_from_header(self) -> None:
+        self._create_room()
+
+    def join_selected_from_header(self) -> None:
+        self._join_selected("play")
+
+    def watch_selected_from_header(self) -> None:
+        self._join_selected("watch")
 
     def _create_room(self) -> None:
         win = tk.Toplevel(self)

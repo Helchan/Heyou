@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from ..core import Core, CoreEvent
-from ..storage import Settings, allocate_runtime_settings, load_settings
+from ..storage import Settings, allocate_runtime_settings, load_settings, save_settings
 from ..util import now_ms
 from .screens.game import GameScreen
 from .screens.lobby import LobbyScreen
@@ -32,6 +32,22 @@ class RootWindow:
 
         self._sub = ttk.Label(self._header, text="LAN • P2P • 即开即用", style="SubTitle.TLabel")
         self._sub.pack(side=tk.LEFT, padx=(10, 0), pady=(6, 0))
+
+        self._lobby_room_actions = ttk.Frame(self._header)
+        self._lobby_create_btn = ttk.Button(self._lobby_room_actions, text="创建房间", style="Primary.TButton", command=self._on_lobby_create)
+        self._lobby_create_btn.pack(side=tk.LEFT)
+        self._lobby_join_btn = ttk.Button(self._lobby_room_actions, text="加入对战", command=self._on_lobby_join, state=tk.DISABLED)
+        self._lobby_join_btn.pack(side=tk.LEFT, padx=(8, 0))
+        self._lobby_watch_btn = ttk.Button(self._lobby_room_actions, text="观战", command=self._on_lobby_watch, state=tk.DISABLED)
+        self._lobby_watch_btn.pack(side=tk.LEFT, padx=(8, 0))
+
+        self._lobby_nick_actions = ttk.Frame(self._header)
+        self._nick_var = tk.StringVar(value=self.core.nickname)
+        self._nick_entry = ttk.Entry(self._lobby_nick_actions, textvariable=self._nick_var, width=16, style="Nick.TEntry")
+        self._nick_entry.pack(side=tk.LEFT)
+        self._nick_entry.bind("<Return>", lambda _e: self._commit_nickname())
+        self._nick_btn = ttk.Button(self._lobby_nick_actions, text="修改昵称", style="Primary.TButton", command=self._commit_nickname)
+        self._nick_btn.pack(side=tk.LEFT, padx=(8, 0))
 
         self._game_actions = ttk.Frame(self._header)
         self._game_ready_btn = ttk.Button(self._game_actions, text="准备", style="Primary.TButton", command=self._on_header_ready)
@@ -100,6 +116,19 @@ class RootWindow:
         self._sub.configure(text="")
 
     def _sync_game_header_actions(self) -> None:
+        if self._current == "lobby":
+            if self._game_actions.winfo_manager():
+                self._game_actions.pack_forget()
+            if not self._lobby_nick_actions.winfo_manager():
+                self._lobby_nick_actions.pack(side=tk.RIGHT)
+            if not self._lobby_room_actions.winfo_manager():
+                self._lobby_room_actions.pack(side=tk.RIGHT, padx=(10, 0))
+            self._sync_lobby_header_actions()
+            return
+        if self._lobby_nick_actions.winfo_manager():
+            self._lobby_nick_actions.pack_forget()
+        if self._lobby_room_actions.winfo_manager():
+            self._lobby_room_actions.pack_forget()
         if self._current != "game":
             if self._game_actions.winfo_manager():
                 self._game_actions.pack_forget()
@@ -122,6 +151,46 @@ class RootWindow:
         else:
             if self._game_start_btn.winfo_manager():
                 self._game_start_btn.pack_forget()
+
+    def _sync_lobby_header_actions(self) -> None:
+        if self._current != "lobby":
+            return
+        lobby: LobbyScreen = self.screens["lobby"]  # type: ignore[assignment]
+        can_join = lobby.can_join_selected()
+        can_watch = lobby.can_watch_selected()
+        self._lobby_join_btn.configure(state=(tk.NORMAL if can_join else tk.DISABLED))
+        self._lobby_watch_btn.configure(state=(tk.NORMAL if can_watch else tk.DISABLED))
+
+    def _commit_nickname(self) -> None:
+        if self._current != "lobby":
+            self.toast.show("仅可在大厅修改昵称")
+            return
+        nick = self._nick_var.get().strip()
+        if not nick:
+            return
+        self._nick_var.set(nick)
+        self.core.set_nickname(nick)
+        self.persistent_settings = Settings(peer_id=self.persistent_settings.peer_id, nickname=nick)
+        save_settings(self.persistent_settings)
+        self.toast.show("昵称已更新")
+
+    def _on_lobby_create(self) -> None:
+        if self._current != "lobby":
+            return
+        lobby: LobbyScreen = self.screens["lobby"]  # type: ignore[assignment]
+        lobby.create_room_from_header()
+
+    def _on_lobby_join(self) -> None:
+        if self._current != "lobby":
+            return
+        lobby: LobbyScreen = self.screens["lobby"]  # type: ignore[assignment]
+        lobby.join_selected_from_header()
+
+    def _on_lobby_watch(self) -> None:
+        if self._current != "lobby":
+            return
+        lobby: LobbyScreen = self.screens["lobby"]  # type: ignore[assignment]
+        lobby.watch_selected_from_header()
 
     def _on_header_ready(self) -> None:
         if self._current != "game":
@@ -153,6 +222,9 @@ class RootWindow:
             self._update_status_by_peers(items)
             lobby: LobbyScreen = self.screens["lobby"]  # type: ignore[assignment]
             lobby.set_peers(items)
+            return
+        if ev.type == "nickname_changed":
+            self._nick_var.set(str(ev.payload.get("nickname", "")) or self.core.nickname)
             return
         if ev.type == "rooms":
             now = now_ms()
