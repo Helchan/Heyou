@@ -4,7 +4,7 @@ import threading
 from dataclasses import dataclass, replace
 from typing import Any, Callable
 
-from .game import GameRegistry, GomokuState, BOARD_SIZE
+from .game import GameRegistry, GobangState, BOARD_SIZE
 from .model.room import RoomHostState, RoomSummary
 from .net.node import Node, NodeConfig, NodeEvent
 from .util import new_id, now_ms
@@ -101,15 +101,15 @@ class Core:
         if rooms_changed:
             self._emit("rooms", {})
 
-    def create_room(self, name: str, game: str = "gomoku") -> str:
+    def create_room(self, name: str, game: str = "gobang") -> str:
         assert self.node.listen_addr is not None
         room_id = f"{self.peer_id[:8]}-{new_id()[:10]}"
-        game_key = game.strip().lower() if isinstance(game, str) else "gomoku"
+        game_key = game.strip().lower() if isinstance(game, str) else "gobang"
         
         # 从 GameRegistry 获取游戏配置
         handler = GameRegistry.get_handler(game_key)
         if handler is None:
-            game_key = "gomoku"
+            game_key = "gobang"
             handler = GameRegistry.get_handler(game_key)
         config = handler.get_config() if handler else None
         team_size = config.team_size if config else 1
@@ -394,7 +394,7 @@ class Core:
                 players=int(room.get("players", 1) or 1),
                 spectators=int(room.get("spectators", 0) or 0),
                 updated_ms=int(room.get("updated_ms", 0) or 0),
-                game=str(room.get("game", "gomoku") or "gomoku"),
+                game=str(room.get("game", "gobang") or "gobang"),
             )
         except Exception:
             return
@@ -669,7 +669,7 @@ class Core:
         black = str(msg.get("black_peer_id", ""))
         white = str(msg.get("white_peer_id", ""))
         next_peer_id = str(msg.get("next_peer_id", black))
-        game = GomokuState.new(next_peer_id=next_peer_id)
+        game = GobangState.new(next_peer_id=next_peer_id)
         game.colors = {black: 1, white: 2}
         with self._lock:
             self._games[room_id] = game
@@ -712,7 +712,7 @@ class Core:
             return
         
         # 使用 GameHandler 获取广播状态
-        game_name = st.game if st else "gomoku"
+        game_name = st.game if st else "gobang"
         handler = GameRegistry.get_handler(game_name)
         if handler is None:
             return
@@ -738,7 +738,7 @@ class Core:
             return
         next_peer_id = str(msg.get("next_peer_id", ""))
         winner = str(msg.get("winner_peer_id")) if msg.get("winner_peer_id") else None
-        game = GomokuState.new(next_peer_id=next_peer_id)
+        game = GobangState.new(next_peer_id=next_peer_id)
         for i, v in enumerate(board):
             y, x = divmod(i, BOARD_SIZE)
             try:

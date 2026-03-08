@@ -4,13 +4,13 @@ import os
 import shutil
 import tempfile
 
-from gomoku_lan.storage import Settings, _release_runtime_locks_for_tests, allocate_runtime_settings
+from gobang.storage import Settings, _release_runtime_locks_for_tests, allocate_runtime_settings
 
 
 class StorageTests(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmp = tempfile.mkdtemp(prefix="gomoku-lan-test-")
-        os.environ["GOMOKU_LAN_DATA_DIR"] = self._tmp
+        self._tmp = tempfile.mkdtemp(prefix="gobang-test-")
+        os.environ["GOBANG_DATA_DIR"] = self._tmp
 
     def tearDown(self) -> None:
         _release_runtime_locks_for_tests()
@@ -18,7 +18,7 @@ class StorageTests(unittest.TestCase):
             shutil.rmtree(self._tmp)
         except Exception:
             pass
-        os.environ.pop("GOMOKU_LAN_DATA_DIR", None)
+        os.environ.pop("GOBANG_DATA_DIR", None)
 
     def test_allocate_runtime_settings_second_instance(self) -> None:
         base = Settings(peer_id="peer-fixed", nickname="玩家A")

@@ -1,6 +1,6 @@
 import unittest
 
-from gomoku_lan.model.game import BOARD_SIZE, GameState, check_winner
+from gobang.model.game import BOARD_SIZE, GameState, check_winner
 
 
 class GameTests(unittest.TestCase):

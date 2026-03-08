@@ -40,11 +40,11 @@ python3.12 main.py
 
 ## 配置与数据目录
 
-- 环境变量：`GOMOKU_LAN_DATA_DIR` 可覆盖应用数据目录（便于多开或迁移数据）
-- 默认数据目录：`~/.gomoku_lan`（按平台展开用户主目录）
+- 环境变量：`GOBANG_DATA_DIR` 可覆盖应用数据目录（便于多开或迁移数据）
+- 默认数据目录：`~/.gobang`（按平台展开用户主目录）
 - 持久化文件：`settings.json` 存储 `peer_id` 与昵称
 
-参考实现：数据目录与设置读写逻辑见 [util.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/util.py) 与 [storage.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/storage.py)。
+参考实现：数据目录与设置读写逻辑见 [util.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/util.py) 与 [storage.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/storage.py)。
 
 ## 目录结构
 
@@ -53,7 +53,7 @@ python3.12 main.py
 ├── main.py                      # 应用入口，启动 Tk 与核心
 ├── run_mac.command              # macOS 一键启动脚本（支持 profile）
 ├── run_windows.bat              # Windows 一键启动脚本（支持 profile）
-├── gomoku_lan/
+├── gobang/
 │   ├── app.py                   # run() 创建 GUI 根并挂载核心
 │   ├── core.py                  # 房间/对局状态机与事件分发
 │   ├── storage.py               # settings 持久化与多开锁
@@ -78,12 +78,12 @@ python3.12 main.py
 
 ## 运行与架构说明
 
-- 应用入口：`main.py` 调用 [app.run](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/app.py#L1-L14) 创建 Tk 窗口并挂载核心与界面
-- GUI 驱动：界面事件通过 [gui/root.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/gui/root.py) 派发并响应核心事件
+- 应用入口：`main.py` 调用 [app.run](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/app.py#L1-L14) 创建 Tk 窗口并挂载核心与界面
+- GUI 驱动：界面事件通过 [gui/root.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/gui/root.py) 派发并响应核心事件
 - 网络节点：
-  - UDP 发现端口：`37020`，参见 [discovery.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/net/discovery.py#L12-L13)
-  - TCP 监听：绑定到随机空闲端口（`bind('', 0)`），参见 [node.py:start](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/net/node.py#L55-L66)
-  - 消息协议：JSON 帧 + 4 字节长度前缀，参见 [protocol.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/net/protocol.py)
+  - UDP 发现端口：`37020`，参见 [discovery.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/net/discovery.py#L12-L13)
+  - TCP 监听：绑定到随机空闲端口（`bind('', 0)`），参见 [node.py:start](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/net/node.py#L55-L66)
+  - 消息协议：JSON 帧 + 4 字节长度前缀，参见 [protocol.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/net/protocol.py)
 
 ## 测试
 
@@ -119,5 +119,5 @@ python tests/test_node.py
 感谢开源社区与 Python 标准库提供的稳健基础能力。
 
 —— 项目关键文件：
-- 入口与 GUI：[main.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/main.py)、[app.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/app.py)、[gui/root.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/gui/root.py)
-- 核心与网络：[core.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/core.py)、[net/node.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/net/node.py)、[net/discovery.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/net/discovery.py)、[net/protocol.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gomoku_lan/net/protocol.py)
+- 入口与 GUI：[main.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/main.py)、[app.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/app.py)、[gui/root.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/gui/root.py)
+- 核心与网络：[core.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/core.py)、[net/node.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/net/node.py)、[net/discovery.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/net/discovery.py)、[net/protocol.py](file:///Users/helchan/Space/HiProject/App/GomokuLAN/gobang/net/protocol.py)

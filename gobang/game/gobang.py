@@ -14,7 +14,7 @@ BOARD_SIZE = 15
 
 
 @dataclass
-class GomokuState:
+class GobangState:
     """五子棋游戏状态"""
     board: list[list[int]]  # 棋盘，0=空, 1=黑, 2=白
     next_peer_id: str  # 下一个落子的玩家
@@ -23,8 +23,8 @@ class GomokuState:
     colors: dict[str, int] | None = None  # peer_id -> color (1=黑, 2=白)
 
     @staticmethod
-    def new(next_peer_id: str) -> "GomokuState":
-        return GomokuState(
+    def new(next_peer_id: str) -> "GobangState":
+        return GobangState(
             board=[[0 for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)],
             next_peer_id=next_peer_id,
         )
@@ -55,18 +55,18 @@ def check_winner(board: list[list[int]], x: int, y: int) -> int:
     return 0
 
 
-class GomokuHandler(GameHandler):
+class GobangHandler(GameHandler):
     """五子棋游戏处理器"""
 
     @staticmethod
     def get_config() -> GameConfig:
         return GameConfig(
-            game_name="gomoku",
+            game_name="gobang",
             game_display_name="五子棋",
             team_size=1,  # 1v1
         )
 
-    def create_game_state(self, team_a: list[str], team_b: list[str]) -> GomokuState:
+    def create_game_state(self, team_a: list[str], team_b: list[str]) -> GobangState:
         """创建五子棋游戏状态，随机分配黑白"""
         if not team_a or not team_b:
             raise ValueError("Both teams must have at least one player")
@@ -81,13 +81,13 @@ class GomokuHandler(GameHandler):
         else:
             black, white = player_b, player_a
         
-        state = GomokuState.new(next_peer_id=black)
+        state = GobangState.new(next_peer_id=black)
         state.colors = {black: 1, white: 2}
         return state
 
-    def apply_action(self, state: Any, peer_id: str, action: dict[str, Any]) -> tuple[GomokuState, bool]:
+    def apply_action(self, state: Any, peer_id: str, action: dict[str, Any]) -> tuple[GobangState, bool]:
         """应用落子操作"""
-        if not isinstance(state, GomokuState):
+        if not isinstance(state, GobangState):
             return state, False
         
         # 检查是否轮到该玩家
@@ -133,7 +133,7 @@ class GomokuHandler(GameHandler):
 
     def check_game_over(self, state: Any, team_a: list[str], team_b: list[str]) -> tuple[bool, str | None]:
         """检查游戏是否结束"""
-        if not isinstance(state, GomokuState):
+        if not isinstance(state, GobangState):
             return False, None
         
         if state.winner_peer_id is None:
@@ -149,7 +149,7 @@ class GomokuHandler(GameHandler):
 
     def get_state_for_broadcast(self, state: Any) -> dict[str, Any]:
         """获取用于广播的状态"""
-        if not isinstance(state, GomokuState):
+        if not isinstance(state, GobangState):
             return {}
         
         colors = state.colors or {}
@@ -168,7 +168,7 @@ class GomokuHandler(GameHandler):
 
     def get_next_player(self, state: Any) -> str | None:
         """获取下一个应该操作的玩家"""
-        if not isinstance(state, GomokuState):
+        if not isinstance(state, GobangState):
             return None
         if state.winner_peer_id is not None:
             return None
@@ -176,10 +176,10 @@ class GomokuHandler(GameHandler):
 
     def get_winner(self, state: Any) -> str | None:
         """获取获胜玩家"""
-        if not isinstance(state, GomokuState):
+        if not isinstance(state, GobangState):
             return None
         return state.winner_peer_id
 
 
 # 注册五子棋游戏
-GameRegistry.register(GomokuHandler)
+GameRegistry.register(GobangHandler)

@@ -19,7 +19,7 @@ class RoomSummary:
     players: int  # 总玩家数（兼容字段）
     spectators: int
     updated_ms: int
-    game: str = "gomoku"
+    game: str = "gobang"
 
 
 @dataclass
@@ -31,7 +31,7 @@ class RoomHostState:
     host_nickname: str
     host_ip: str
     host_port: int
-    game: str = "gomoku"
+    game: str = "gobang"
     status: str = "waiting"  # waiting | playing
     team_size: int = 1  # 每方需要的人数，1v1 为 1，2v2 为 2
     team_a: list[str] = field(default_factory=list)  # A方玩家（房主方）

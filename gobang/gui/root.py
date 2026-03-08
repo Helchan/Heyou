@@ -97,8 +97,8 @@ class RootWindow:
             return
         rid = str(kwargs.get("room_id", ""))
         room = self.core.rooms.get(rid) if rid else None
-        game = str(getattr(room, "game", "gomoku")) if room is not None else "gomoku"
-        game_name = "五子棋" if game == "gomoku" else "未知游戏"
+        game = str(getattr(room, "game", "gobang")) if room is not None else "gobang"
+        game_name = "五子棋" if game == "gobang" else "未知游戏"
         self._title.configure(text=game_name)
         self._sub.configure(text="")
 

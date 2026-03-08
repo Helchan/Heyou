@@ -27,7 +27,7 @@ _lock_fds: list[int] = []
 
 
 def _settings_path() -> str:
-    return os.path.join(get_data_dir("gomoku_lan"), "settings.json")
+    return os.path.join(get_data_dir("gobang"), "settings.json")
 
 
 def load_settings() -> Settings:
@@ -56,7 +56,7 @@ def save_settings(s: Settings) -> None:
 
 def allocate_runtime_settings(base: Settings) -> tuple[Settings, bool]:
     try:
-        base_dir = get_data_dir("gomoku_lan")
+        base_dir = get_data_dir("gobang")
         locks_dir = os.path.join(base_dir, "locks")
         os.makedirs(locks_dir, exist_ok=True)
     except Exception:

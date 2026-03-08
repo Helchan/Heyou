@@ -1,4 +1,4 @@
-from gomoku_lan.app import run
+from gobang.app import run
 
 
 if __name__ == "__main__":

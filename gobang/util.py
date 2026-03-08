@@ -15,8 +15,8 @@ def new_id() -> str:
     return uuid.uuid4().hex
 
 
-def get_data_dir(app_name: str = "gomoku_lan") -> str:
-    override = os.environ.get("GOMOKU_LAN_DATA_DIR", "").strip()
+def get_data_dir(app_name: str = "gobang") -> str:
+    override = os.environ.get("GOBANG_DATA_DIR", "").strip()
     if override:
         path = override
     else:

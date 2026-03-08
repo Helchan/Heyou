@@ -2,8 +2,8 @@ import queue
 import time
 import unittest
 
-from gomoku_lan.net.discovery import _probe_targets
-from gomoku_lan.net.node import Node, NodeConfig
+from gobang.net.discovery import _probe_targets
+from gobang.net.node import Node, NodeConfig
 
 
 class NodeTests(unittest.TestCase):

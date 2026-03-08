@@ -1,6 +1,6 @@
 import unittest
 
-from gomoku_lan.net.protocol import decode_frames, encode_frame
+from gobang.net.protocol import decode_frames, encode_frame
 
 
 class ProtocolTests(unittest.TestCase):

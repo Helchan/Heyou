@@ -126,7 +126,7 @@ class LobbyScreen(ttk.Frame):
             self.tree.delete(i)
         for r in sorted(rooms, key=lambda rr: rr.updated_ms, reverse=True):
             status = self._room_status_text(r)
-            game = self._game_name(getattr(r, "game", "gomoku"))
+            game = self._game_name(getattr(r, "game", "gobang"))
             host = r.host_nickname or r.host_peer_id[:6]
             addr = f"{r.host_ip}:{r.host_port}" if r.host_ip and r.host_port else ""
             self.tree.insert(
@@ -184,7 +184,7 @@ class LobbyScreen(ttk.Frame):
                 getattr(self.app, "_commit_nickname")()
 
     def _game_name(self, game: str) -> str:
-        return "五子棋" if game == "gomoku" else "未知游戏"
+        return "五子棋" if game == "gobang" else "未知游戏"
 
     def _join_selected(self, want: str) -> None:
         rid = self._selected_room_id()
@@ -244,8 +244,8 @@ class LobbyScreen(ttk.Frame):
         entry.focus_set()
 
         ttk.Label(body, text="游戏", style="SubTitle.TLabel").pack(anchor=tk.W)
-        game_var = tk.StringVar(value="gomoku")
-        ttk.Radiobutton(body, text="五子棋", variable=game_var, value="gomoku").pack(anchor=tk.W, pady=(8, 12))
+        game_var = tk.StringVar(value="gobang")
+        ttk.Radiobutton(body, text="五子棋", variable=game_var, value="gobang").pack(anchor=tk.W, pady=(8, 12))
 
         btns = ttk.Frame(body, style="Card.TFrame")
         btns.pack(fill=tk.X)
