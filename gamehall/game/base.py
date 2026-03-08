@@ -119,3 +119,19 @@ class GameHandler(ABC):
             获胜玩家的 peer_id，如果未结束或平局返回 None
         """
         pass
+
+    @abstractmethod
+    def restore_from_broadcast(self, data: dict[str, Any]) -> Any:
+        """
+        从广播数据恢复游戏状态
+        
+        当非房主玩家收到 game_state 消息时，使用此方法重建游戏状态对象。
+        
+        Args:
+            data: get_state_for_broadcast() 返回的数据
+            
+        Returns:
+            恢复的游戏状态对象
+        """
+        pass
+

@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from ..core import Core, CoreEvent
+from ..game import GameRegistry
 from ..storage import Settings, allocate_runtime_settings, load_settings, save_settings
 from ..util import now_ms
 from .screens.game import GameScreen
@@ -98,7 +99,8 @@ class RootWindow:
         rid = str(kwargs.get("room_id", ""))
         room = self.core.rooms.get(rid) if rid else None
         game = str(getattr(room, "game", "gobang")) if room is not None else "gobang"
-        game_name = "五子棋" if game == "gobang" else "未知游戏"
+        handler = GameRegistry.get_handler(game)
+        game_name = handler.get_config().game_display_name if handler else game
         self._title.configure(text=game_name)
         self._sub.configure(text="")
 

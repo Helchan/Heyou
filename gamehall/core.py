@@ -4,7 +4,8 @@ import threading
 from dataclasses import dataclass, replace
 from typing import Any, Callable
 
-from .game import GameRegistry, GobangState, BOARD_SIZE
+from .game import GameRegistry
+from .model.game import GameStateWrapper
 from .model.room import RoomHostState, RoomSummary
 from .net.node import Node, NodeConfig, NodeEvent
 from .util import new_id, now_ms
@@ -29,8 +30,8 @@ class Core:
 
         self._known_nicknames: dict[str, str] = {peer_id: nickname}
 
-        self._games: dict[str, GameState] = {}
-        self._colors: dict[str, dict[str, int]] = {}
+        # 使用 GameStateWrapper 管理游戏状态（通用化）
+        self._games: dict[str, GameStateWrapper] = {}
 
         self._room_ad_thread: threading.Thread | None = None
         self._prune_thread: threading.Thread | None = None
@@ -198,25 +199,33 @@ class Core:
             return
         
         game_state = handler.create_game_state(st.team_a, st.team_b)
+        
+        # 使用 GameStateWrapper 包装游戏状态
+        wrapper = GameStateWrapper(
+            game_name=st.game,
+            state=game_state,
+            started_ms=now_ms(),
+        )
         with self._lock:
-            self._games[room_id] = game_state
-            # 保存 colors 以便兼容
-            if hasattr(game_state, 'colors') and game_state.colors:
-                self._colors[room_id] = game_state.colors
+            self._games[room_id] = wrapper
 
-        # 广播游戏开始
+        # 广播游戏开始（通用格式）
         broadcast_state = handler.get_state_for_broadcast(game_state)
         self._broadcast_room(room_id, {
             "type": "game_start",
             "room_id": room_id,
+            "game": st.game,
+            "game_state": broadcast_state,
+            # 保留向后兼容字段
             "black_peer_id": broadcast_state.get("black_peer_id"),
             "white_peer_id": broadcast_state.get("white_peer_id"),
-            "board_size": broadcast_state.get("board_size", BOARD_SIZE),
+            "board_size": broadcast_state.get("board_size", 15),
             "next_peer_id": broadcast_state.get("next_peer_id"),
         })
         self._broadcast_game_state(room_id)
         self._emit("game_started", {
             "room_id": room_id,
+            "game": st.game,
             "black_peer_id": broadcast_state.get("black_peer_id"),
             "white_peer_id": broadcast_state.get("white_peer_id"),
             "next_peer_id": broadcast_state.get("next_peer_id"),
@@ -236,7 +245,6 @@ class Core:
         st.updated_ms = now_ms()
         with self._lock:
             self._games.pop(room_id, None)
-            self._colors.pop(room_id, None)
         self._announce_room(room_id)
         parts = st.participants()
         self._broadcast_room(room_id, {"type": "room_state", "room_id": room_id, "participants": parts})
@@ -374,7 +382,6 @@ class Core:
             if room_id:
                 with self._lock:
                     self._games.pop(room_id, None)
-                    self._colors.pop(room_id, None)
                 self._emit("game_state", {"room_id": room_id})
             return
 
@@ -475,31 +482,39 @@ class Core:
 
         if ok and role == "spectator" and st.status == "playing":
             with self._lock:
-                colors = self._colors.get(room_id)
-                game = self._games.get(room_id)
-            if colors and game and st.team_b:
+                wrapper = self._games.get(room_id)
+            if wrapper and st.team_b:
+                game_state = wrapper.state
+                # 从游戏状态中获取 colors
+                colors = getattr(game_state, 'colors', {}) or {}
                 black = next((pid for pid, c in colors.items() if c == 1), st.host_peer_id)
                 white = next((pid for pid, c in colors.items() if c == 2), st.team_b[0] if st.team_b else "")
-                self.node.send_to_peer(
-                    peer_id,
-                    {
-                        "type": "game_start",
-                        "room_id": room_id,
-                        "black_peer_id": black,
-                        "white_peer_id": white,
-                        "board_size": BOARD_SIZE,
-                        "next_peer_id": getattr(game, 'next_peer_id', black),
-                    },
-                )
+                
                 # 获取广播状态
                 handler = GameRegistry.get_handler(st.game)
                 if handler:
-                    broadcast_state = handler.get_state_for_broadcast(game)
+                    broadcast_state = handler.get_state_for_broadcast(game_state)
+                    board_size = broadcast_state.get("board_size", 15)
+                    self.node.send_to_peer(
+                        peer_id,
+                        {
+                            "type": "game_start",
+                            "room_id": room_id,
+                            "game": st.game,
+                            "game_state": broadcast_state,
+                            "black_peer_id": black,
+                            "white_peer_id": white,
+                            "board_size": board_size,
+                            "next_peer_id": getattr(game_state, 'next_peer_id', black),
+                        },
+                    )
                     self.node.send_to_peer(
                         peer_id,
                         {
                             "type": "game_state",
                             "room_id": room_id,
+                            "game": st.game,
+                            "game_state": broadcast_state,
                             "board": broadcast_state.get("board", []),
                             "next_peer_id": broadcast_state.get("next_peer_id"),
                             "winner_peer_id": broadcast_state.get("winner_peer_id"),
@@ -522,7 +537,6 @@ class Core:
         if status == "waiting":
             with self._lock:
                 self._games.pop(room_id, None)
-                self._colors.pop(room_id, None)
         
         with self._lock:
             self._active_room_id = room_id
@@ -559,7 +573,6 @@ class Core:
                 st.status = "waiting"
                 with self._lock:
                     self._games.pop(room_id, None)
-                    self._colors.pop(room_id, None)
                 should_show_alert = True
                 alert_message = f"对手 {left_nickname} 已退出，游戏结束"
             else:
@@ -619,11 +632,13 @@ class Core:
     def _apply_move_as_host(self, room_id: str, peer_id: str, x: int, y: int) -> None:
         with self._lock:
             st = self._host_rooms.get(room_id)
-            game = self._games.get(room_id)
-        if st is None or game is None:
+            wrapper = self._games.get(room_id)
+        if st is None or wrapper is None:
             return
         if st.status != "playing":
             return
+        
+        game_state = wrapper.state
         
         # 使用 GameHandler 处理操作
         handler = GameRegistry.get_handler(st.game)
@@ -631,24 +646,21 @@ class Core:
             return
         
         # 检查游戏是否已结束
-        game_over, _ = handler.check_game_over(game, st.team_a, st.team_b)
+        game_over, _ = handler.check_game_over(game_state, st.team_a, st.team_b)
         if game_over:
             return
         
         # 应用操作
         action = {"x": x, "y": y}
-        game, success = handler.apply_action(game, peer_id, action)
+        new_state, success = handler.apply_action(game_state, peer_id, action)
         if not success:
             return
         
-        with self._lock:
-            self._games[room_id] = game
-            # 更新 colors
-            if hasattr(game, 'colors') and game.colors:
-                self._colors[room_id] = game.colors
+        # 更新 wrapper 中的状态
+        wrapper.update_state(new_state, now_ms())
         
         # 检查游戏是否结束
-        game_over, winner_team = handler.check_game_over(game, st.team_a, st.team_b)
+        game_over, winner_team = handler.check_game_over(new_state, st.team_a, st.team_b)
         if game_over:
             st.status = "waiting"
             # 重置 B 方准备状态
@@ -666,15 +678,57 @@ class Core:
         room_id = str(msg.get("room_id", ""))
         if not room_id:
             return
-        black = str(msg.get("black_peer_id", ""))
-        white = str(msg.get("white_peer_id", ""))
-        next_peer_id = str(msg.get("next_peer_id", black))
-        game = GobangState.new(next_peer_id=next_peer_id)
-        game.colors = {black: 1, white: 2}
+        
+        # 获取游戏类型和状态数据
+        game_name = str(msg.get("game", "gobang"))
+        game_data = msg.get("game_state", {})
+        
+        # 使用 GameHandler 恢复游戏状态
+        handler = GameRegistry.get_handler(game_name)
+        if handler is None:
+            # 回退到默认处理（向后兼容）
+            game_name = "gobang"
+            handler = GameRegistry.get_handler(game_name)
+        
+        if handler is None:
+            return
+        
+        # 从广播数据恢复游戏状态
+        if game_data:
+            game_state = handler.restore_from_broadcast(game_data)
+        else:
+            # 向后兼容：从旧格式字段恢复
+            black = str(msg.get("black_peer_id", ""))
+            white = str(msg.get("white_peer_id", ""))
+            next_peer_id = str(msg.get("next_peer_id", black))
+            board_size = int(msg.get("board_size", 15))
+            game_state = handler.restore_from_broadcast({
+                "black_peer_id": black,
+                "white_peer_id": white,
+                "next_peer_id": next_peer_id,
+                "board_size": board_size,
+                "board": [0] * (board_size * board_size),
+                "colors": {black: 1, white: 2} if black and white else {},
+            })
+        
+        # 使用 GameStateWrapper 包装
+        wrapper = GameStateWrapper(
+            game_name=game_name,
+            state=game_state,
+            started_ms=now_ms(),
+        )
         with self._lock:
-            self._games[room_id] = game
-            self._colors[room_id] = {black: 1, white: 2}
-        self._emit("game_started", {"room_id": room_id, "black_peer_id": black, "white_peer_id": white, "next_peer_id": next_peer_id})
+            self._games[room_id] = wrapper
+        
+        # 获取广播状态中的字段用于事件
+        broadcast_state = handler.get_state_for_broadcast(game_state)
+        self._emit("game_started", {
+            "room_id": room_id,
+            "game": game_name,
+            "black_peer_id": broadcast_state.get("black_peer_id", ""),
+            "white_peer_id": broadcast_state.get("white_peer_id", ""),
+            "next_peer_id": broadcast_state.get("next_peer_id", ""),
+        })
 
     def _handle_room_chat(self, msg: dict[str, Any]) -> None:
         room_id = str(msg.get("room_id", ""))
@@ -706,23 +760,28 @@ class Core:
 
     def _broadcast_game_state(self, room_id: str) -> None:
         with self._lock:
-            game = self._games.get(room_id)
+            wrapper = self._games.get(room_id)
             st = self._host_rooms.get(room_id)
-        if game is None:
+        if wrapper is None:
             return
         
+        game_state = wrapper.state
+        
         # 使用 GameHandler 获取广播状态
-        game_name = st.game if st else "gobang"
+        game_name = st.game if st else wrapper.game_name
         handler = GameRegistry.get_handler(game_name)
         if handler is None:
             return
         
-        broadcast_state = handler.get_state_for_broadcast(game)
+        broadcast_state = handler.get_state_for_broadcast(game_state)
         self._broadcast_room(
             room_id,
             {
                 "type": "game_state",
                 "room_id": room_id,
+                "game": game_name,
+                "game_state": broadcast_state,
+                # 保留向后兼容字段
                 "board": broadcast_state.get("board", []),
                 "next_peer_id": broadcast_state.get("next_peer_id"),
                 "winner_peer_id": broadcast_state.get("winner_peer_id"),
@@ -733,31 +792,44 @@ class Core:
 
     def _handle_game_state(self, msg: dict[str, Any]) -> None:
         room_id = str(msg.get("room_id", ""))
-        board = msg.get("board")
-        if not room_id or not isinstance(board, list) or len(board) != BOARD_SIZE * BOARD_SIZE:
+        if not room_id:
             return
-        next_peer_id = str(msg.get("next_peer_id", ""))
-        winner = str(msg.get("winner_peer_id")) if msg.get("winner_peer_id") else None
-        game = GobangState.new(next_peer_id=next_peer_id)
-        for i, v in enumerate(board):
-            y, x = divmod(i, BOARD_SIZE)
-            try:
-                game.board[y][x] = int(v)
-            except Exception:
-                game.board[y][x] = 0
-        game.winner_peer_id = winner
-        lm = msg.get("last_move")
-        if isinstance(lm, list) and len(lm) == 3:
-            try:
-                game.last_move = (int(lm[0]), int(lm[1]), int(lm[2]))
-            except Exception:
-                pass
-        # 从 _colors 恢复颜色信息
+        
+        # 获取游戏类型
+        game_name = str(msg.get("game", "gobang"))
+        game_data = msg.get("game_state", {})
+        
+        # 使用 GameHandler 恢复游戏状态
+        handler = GameRegistry.get_handler(game_name)
+        if handler is None:
+            game_name = "gobang"
+            handler = GameRegistry.get_handler(game_name)
+        
+        if handler is None:
+            return
+        
+        # 从广播数据恢复游戏状态
+        if game_data:
+            game_state = handler.restore_from_broadcast(game_data)
+        else:
+            # 向后兼容：从旧格式字段恢复
+            board = msg.get("board", [])
+            game_state = handler.restore_from_broadcast({
+                "board": board,
+                "next_peer_id": str(msg.get("next_peer_id", "")),
+                "winner_peer_id": msg.get("winner_peer_id"),
+                "last_move": msg.get("last_move"),
+                "board_size": 15,
+            })
+        
+        # 使用 GameStateWrapper 包装
+        wrapper = GameStateWrapper(
+            game_name=game_name,
+            state=game_state,
+            last_action_ms=now_ms(),
+        )
         with self._lock:
-            colors = self._colors.get(room_id)
-            if colors:
-                game.colors = colors
-            self._games[room_id] = game
+            self._games[room_id] = wrapper
         self._emit("game_state", {"room_id": room_id})
 
     def _room_ad_loop(self) -> None:
@@ -799,7 +871,6 @@ class Core:
                 self._host_rooms.pop(room_id, None)
                 self.rooms.pop(room_id, None)
                 self._games.pop(room_id, None)
-                self._colors.pop(room_id, None)
             self._emit("rooms", {})
             self._emit("room_left", {"room_id": room_id, "host_closed": True})
             return
@@ -828,7 +899,6 @@ class Core:
             self._host_rooms.pop(room_id, None)
             self.rooms.pop(room_id, None)
             self._games.pop(room_id, None)
-            self._colors.pop(room_id, None)
         self._emit("rooms", {})
         self._emit("room_left", {"room_id": room_id, "host_closed": True})
 
@@ -885,7 +955,6 @@ class Core:
         for rid in game_reset_rooms:
             with self._lock:
                 self._games.pop(rid, None)
-                self._colors.pop(rid, None)
 
         if removed:
             self._emit("rooms", {})

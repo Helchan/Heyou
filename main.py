@@ -1,4 +1,4 @@
-from gobang.app import run
+from gamehall.app import run
 
 
 if __name__ == "__main__":

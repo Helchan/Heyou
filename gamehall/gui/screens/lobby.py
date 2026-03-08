@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from ...model.room import RoomSummary
+from ...game import GameRegistry
 
 
 class LobbyScreen(ttk.Frame):
@@ -184,7 +185,12 @@ class LobbyScreen(ttk.Frame):
                 getattr(self.app, "_commit_nickname")()
 
     def _game_name(self, game: str) -> str:
-        return "五子棋" if game == "gobang" else "未知游戏"
+        """从 GameRegistry 获取游戏显示名称"""
+        handler = GameRegistry.get_handler(game)
+        if handler:
+            config = handler.get_config()
+            return config.game_display_name
+        return game
 
     def _join_selected(self, want: str) -> None:
         rid = self._selected_room_id()

@@ -5,7 +5,8 @@ from tkinter import ttk
 
 import time
 
-from ...model.game import BOARD_SIZE
+from ...game.renderer import RendererRegistry, GameRenderer
+from ...model.game import GameStateWrapper
 
 
 class GameScreen(ttk.Frame):
@@ -22,6 +23,8 @@ class GameScreen(ttk.Frame):
         self.role: str = "spectator"
         self._participants: dict[str, object] = {}
         self._ready_state = False
+        self._renderer: GameRenderer | None = None
+        self._game_container: tk.Frame | None = None
 
         card = ttk.Frame(self, style="Card.TFrame")
         card.pack(fill=tk.BOTH, expand=True)
@@ -41,17 +44,12 @@ class GameScreen(ttk.Frame):
         body = ttk.Frame(card, style="Card.TFrame")
         body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
 
-        left = ttk.Frame(body, style="Card.TFrame")
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._left = ttk.Frame(body, style="Card.TFrame")
+        self._left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         right = ttk.Frame(body, style="Card2.TFrame", width=320)
         right.pack(side=tk.RIGHT, fill=tk.Y, padx=(12, 0))
         right.pack_propagate(False)
-
-        self.canvas = tk.Canvas(left, bg="#e7cfa5", highlightthickness=0)
-        self.canvas.pack(fill=tk.BOTH, expand=True)
-        self.canvas.bind("<Button-1>", self._on_click)
-        self.canvas.bind("<Configure>", lambda _e: self._redraw())
 
         ttk.Label(right, text="成员", style="SubTitle.TLabel").pack(anchor=tk.W, padx=12, pady=(12, 10))
         self.participants = tk.Listbox(
@@ -91,9 +89,6 @@ class GameScreen(ttk.Frame):
         self._chat_entry.bind("<Return>", lambda _e: self._send_chat())
         ttk.Button(bar, text="发送", style="Primary.TButton", command=self._send_chat).pack(side=tk.LEFT, padx=(10, 0))
 
-        self._cell = 36
-        self._origin = (20, 20)
-
     def on_show(
         self,
         room_id: str,
@@ -114,10 +109,42 @@ class GameScreen(ttk.Frame):
         if white_peer_id:
             self.white_peer_id = white_peer_id
         self.title.configure(text=f"棋盘 • 房间 {room_id[:8]}")
+        
+        # 获取房间的游戏类型并动态创建渲染器
+        room = getattr(self.app.core, "rooms", {}).get(room_id)
+        game_name = getattr(room, "game", "gobang") if room else "gobang"
+        self._setup_renderer(game_name)
+        
         self.update_participants(participants)
         self.refresh_chat()
         self.refresh()
         self._ensure_timer()
+
+    def _setup_renderer(self, game_name: str) -> None:
+        """动态创建游戏渲染器"""
+        # 清理旧渲染器
+        if self._renderer:
+            self._renderer.destroy()
+            self._renderer = None
+        if self._game_container:
+            self._game_container.destroy()
+            self._game_container = None
+        
+        # 创建新渲染器
+        renderer_class = RendererRegistry.get_renderer(game_name)
+        if renderer_class is None:
+            return
+        
+        self._game_container = tk.Frame(self._left)
+        self._game_container.pack(fill=tk.BOTH, expand=True)
+        
+        self._renderer = renderer_class(
+            parent=self._game_container,
+            core=self.app.core,
+            room_id=self.room_id or "",
+        )
+        widget = self._renderer.create_widget()
+        widget.pack(fill=tk.BOTH, expand=True)
 
     def on_hide(self) -> None:
         if self._timer_job:
@@ -126,6 +153,10 @@ class GameScreen(ttk.Frame):
             except Exception:
                 pass
             self._timer_job = None
+        # 清理渲染器
+        if self._renderer:
+            self._renderer.destroy()
+            self._renderer = None
 
     def refresh_chat(self) -> None:
         if not self.room_id:
@@ -148,60 +179,42 @@ class GameScreen(ttk.Frame):
             host = getattr(room, "host_nickname", "") or getattr(room, "host_peer_id", "")[:6]
             spectators = getattr(room, "spectators", 0)
             self.title.configure(text=f"棋盘 • {name} • 房主 {host} • 观战 {spectators}")
-        game = getattr(self.app.core, "_games", {}).get(self.room_id)
-        if game is None:
+        
+        wrapper = getattr(self.app.core, "_games", {}).get(self.room_id)
+        if wrapper is None or not isinstance(wrapper, GameStateWrapper):
             self.status.configure(text="等待房主开始…")
             self.timer.configure(text="")
-            self._redraw()
+            if self._renderer:
+                self._renderer.render(None)
             self._refresh_controls()
             return
+        
+        game_state = wrapper.state
         my_id = getattr(self.app.core, "peer_id", "")
         nicks = getattr(self.app.core, "_known_nicknames", {})
-        colors = getattr(self.app.core, "_colors", {}).get(self.room_id, {})
-
-        def name(pid: str) -> str:
-            if isinstance(nicks, dict) and pid in nicks:
-                return str(nicks.get(pid) or pid[:6])
-            return pid[:6]
-
-        my_color = colors.get(my_id)
-        if my_color == 1:
-            role = "你是黑"
-        elif my_color == 2:
-            role = "你是白"
-        else:
-            role = "观战"
-
-        opponent = ""
-        if my_color in (1, 2):
-            for pid, c in colors.items():
-                if pid != my_id and c in (1, 2):
-                    opponent = name(pid)
-                    break
-
-        is_my_turn = game.next_peer_id == my_id
-        turn = "轮到你下子" if is_my_turn else f"轮到 {name(game.next_peer_id)} 下子"
-        if game.winner_peer_id:
-            if game.winner_peer_id == my_id:
-                turn = "你赢了"
-            else:
-                turn = f"胜者：{name(game.winner_peer_id)}"
-        tail = f" • 对手 {opponent}" if opponent else ""
-        self.status.configure(text=f"{role}{tail} • {turn}")
-
-        if game.winner_peer_id is None and self._turn_peer_id != game.next_peer_id:
-            self._turn_peer_id = game.next_peer_id
+        
+        # 委托给渲染器生成状态文本
+        if self._renderer:
+            status_text = self._renderer.get_status_text(game_state, my_id, nicks)
+            self.status.configure(text=status_text)
+            self._renderer.render(game_state)
+        
+        # 更新计时器（通用逻辑：检查游戏状态是否有 next_peer_id 和 winner_peer_id）
+        next_peer_id = getattr(game_state, "next_peer_id", None)
+        winner_peer_id = getattr(game_state, "winner_peer_id", None)
+        
+        if winner_peer_id is None and next_peer_id and self._turn_peer_id != next_peer_id:
+            self._turn_peer_id = next_peer_id
             self._turn_started_s = time.monotonic()
-        if game.winner_peer_id is not None:
+        if winner_peer_id is not None:
             self._turn_peer_id = None
             self.timer.configure(text="")
-        self._redraw()
 
-        if game.winner_peer_id:
-            token = f"{self.room_id}:{game.winner_peer_id}"
+        if winner_peer_id:
+            token = f"{self.room_id}:{winner_peer_id}"
             if self._winner_modal_for != token:
                 self._winner_modal_for = token
-                self._show_winner_modal(game.winner_peer_id)
+                self._show_winner_modal(winner_peer_id, game_state)
         self._refresh_controls()
 
     def update_participants(self, participants: object) -> None:
@@ -269,8 +282,10 @@ class GameScreen(ttk.Frame):
         if not self.room_id:
             self._timer_job = None
             return
-        game = getattr(self.app.core, "_games", {}).get(self.room_id)
-        if game is None or game.winner_peer_id is not None or self._turn_peer_id is None:
+        wrapper = getattr(self.app.core, "_games", {}).get(self.room_id)
+        game_state = wrapper.state if isinstance(wrapper, GameStateWrapper) else None
+        winner_peer_id = getattr(game_state, "winner_peer_id", None) if game_state else None
+        if game_state is None or winner_peer_id is not None or self._turn_peer_id is None:
             self.timer.configure(text="")
         else:
             elapsed = max(0.0, time.monotonic() - self._turn_started_s)
@@ -295,83 +310,6 @@ class GameScreen(ttk.Frame):
 
     def ready_button_text(self) -> str:
         return "取消准备" if self._ready_state else "准备"
-
-    def _metrics(self) -> tuple[int, int, int]:
-        w = max(200, int(self.canvas.winfo_width()))
-        h = max(200, int(self.canvas.winfo_height()))
-        size = min(w, h) - 40
-        cell = max(18, size // (BOARD_SIZE - 1))
-        ox = (w - cell * (BOARD_SIZE - 1)) // 2
-        oy = (h - cell * (BOARD_SIZE - 1)) // 2
-        return ox, oy, cell
-
-    def _redraw(self) -> None:
-        self.canvas.delete("all")
-        ox, oy, cell = self._metrics()
-        self._origin = (ox, oy)
-        self._cell = cell
-
-        for i in range(BOARD_SIZE):
-            x = ox + i * cell
-            y0 = oy
-            y1 = oy + (BOARD_SIZE - 1) * cell
-            self.canvas.create_line(x, y0, x, y1, fill="#6b4f2a")
-        for i in range(BOARD_SIZE):
-            y = oy + i * cell
-            x0 = ox
-            x1 = ox + (BOARD_SIZE - 1) * cell
-            self.canvas.create_line(x0, y, x1, y, fill="#6b4f2a")
-
-        stars = [(3, 3), (11, 3), (7, 7), (3, 11), (11, 11)]
-        for sx, sy in stars:
-            cx = ox + sx * cell
-            cy = oy + sy * cell
-            self.canvas.create_oval(cx - 4, cy - 4, cx + 4, cy + 4, fill="#6b4f2a", outline="")
-
-        if not self.room_id:
-            return
-        game = getattr(self.app.core, "_games", {}).get(self.room_id)
-        if game is None:
-            return
-        for y in range(BOARD_SIZE):
-            for x in range(BOARD_SIZE):
-                v = game.board[y][x]
-                if v == 0:
-                    continue
-                cx = ox + x * cell
-                cy = oy + y * cell
-                r = max(7, cell // 2 - 2)
-                if v == 1:
-                    self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#111827", outline="#f8fafc", width=2)
-                else:
-                    self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#f8fafc", outline="#334155", width=2)
-        if game.last_move:
-            x, y, _c = game.last_move
-            cx = ox + x * cell
-            cy = oy + y * cell
-            r = max(9, cell // 2 - 1)
-            self.canvas.create_rectangle(cx - r, cy - r, cx + r, cy + r, outline="#22c55e", width=2)
-
-    def _on_click(self, e: tk.Event) -> None:
-        if not self.room_id:
-            return
-        game = getattr(self.app.core, "_games", {}).get(self.room_id)
-        if game is None:
-            return
-        if game.winner_peer_id:
-            return
-
-        my_id = getattr(self.app.core, "peer_id", "")
-        if game.next_peer_id != my_id:
-            return
-
-        ox, oy = self._origin
-        cell = self._cell
-        x = int(round((e.x - ox) / cell))
-        y = int(round((e.y - oy) / cell))
-        if not (0 <= x < BOARD_SIZE and 0 <= y < BOARD_SIZE):
-            return
-        self.app.core.play_move(self.room_id, x, y)
 
     def _send_chat(self) -> None:
         if not self.room_id:
@@ -409,12 +347,13 @@ class GameScreen(ttk.Frame):
             return
         self.app.core.leave_room(self.room_id)
 
-    def _show_winner_modal(self, winner_peer_id: str) -> None:
+    def _show_winner_modal(self, winner_peer_id: str, game_state: object) -> None:
         if not self.room_id:
             return
         my_id = getattr(self.app.core, "peer_id", "")
         nicks = getattr(self.app.core, "_known_nicknames", {})
-        colors = getattr(self.app.core, "_colors", {}).get(self.room_id, {})
+        # 从游戏状态获取 colors（适用于五子棋等回合制游戏）
+        colors = getattr(game_state, "colors", {}) or {}
 
         def name(pid: str) -> str:
             if isinstance(nicks, dict) and pid in nicks:

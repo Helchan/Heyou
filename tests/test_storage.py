@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 
-from gobang.storage import Settings, _release_runtime_locks_for_tests, allocate_runtime_settings
+from gamehall.storage import Settings, _release_runtime_locks_for_tests, allocate_runtime_settings
 
 
 class StorageTests(unittest.TestCase):

@@ -2,8 +2,8 @@ import queue
 import time
 import unittest
 
-from gobang.net.discovery import _probe_targets
-from gobang.net.node import Node, NodeConfig
+from gamehall.net.discovery import _probe_targets
+from gamehall.net.node import Node, NodeConfig
 
 
 class NodeTests(unittest.TestCase):

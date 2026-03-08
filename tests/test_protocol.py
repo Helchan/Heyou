@@ -1,6 +1,6 @@
 import unittest
 
-from gobang.net.protocol import decode_frames, encode_frame
+from gamehall.net.protocol import decode_frames, encode_frame
 
 
 class ProtocolTests(unittest.TestCase):
